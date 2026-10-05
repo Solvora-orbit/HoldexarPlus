@@ -8,6 +8,20 @@ import type { MessageKey } from '../zh-CN'
 const library: Partial<Record<MessageKey, string>> = {
   'library.stats': '{total} titles · {loaded} loaded',
 
+  /* Boards view (/library/boards, HoldexarPlus addition) */
+  'library.board.title': 'Boards',
+  'library.board.entry': 'Boards',
+  'library.board.specials': 'Specials',
+  'library.board.topsellers': 'Top sellers',
+  'library.board.popularnew': 'Popular new',
+  'library.board.comingsoon': 'Coming soon',
+  'library.board.desc': 'A visual layer over the crawl discovery: board rank × in-library prices. New faces show up once a crawl lands them in the catalog.',
+  'library.board.count': '{n} on this board · loaded',
+  'library.board.empty': 'The board is empty: nothing fetched yet, or the new faces have not entered the catalog. Run a crawl on the Tasks page and come back.',
+  'library.board.gotoCrawl': 'Go to Tasks',
+  'library.board.loadMore': 'Load more',
+  'library.board.backToList': 'Back to the game list',
+
   'library.error.title': 'Could not load the library',
   'library.error.network': 'Cannot reach the server',
 

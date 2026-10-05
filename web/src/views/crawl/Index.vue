@@ -403,7 +403,11 @@ async function startSpecials() {
   starting.value = true
   try {
     const res = await crawlApi.run('specials', undefined, 'specials_backfill')
-    message.success(t('crawl.start.specialsStarted', { id: res.id, count: res.count }))
+    // 带跳转动作的提示：抓完「新面孔」最常被问「去哪看」——直达榜单视图
+    message.success(
+      t('crawl.start.specialsStarted', { id: res.id, count: res.count }),
+      { to: '/library/boards?board=specials', toLabel: t('crawl.start.viewBoard') },
+    )
     crawl.running = true
     await loadJobs()
   } catch (e) {

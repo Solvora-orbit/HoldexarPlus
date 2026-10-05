@@ -550,6 +550,10 @@ onBeforeUnmount(() => {
         <HlButton size="sm" variant="primary" @click="pilotStore.openPilot()">
           {{ t('pilot.ask.entry') }}
         </HlButton>
+        <!-- 榜单视图入口：抓取发现（特惠/热销/新品/即将推出）的可视化在 /library/boards -->
+        <HlButton size="sm" @click="router.push('/library/boards?board=specials')">
+          {{ t('library.board.entry') }}
+        </HlButton>
         <HlButton
           v-if="!removedView"
           size="sm"

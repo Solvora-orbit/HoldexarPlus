@@ -476,6 +476,7 @@ def _build_base_stmt(
 async def list_games(
     *,
     sort: str = "default",
+    board: str = "",
     limit: int = 40,
     after: str | None = None,
     q: str | None = None,
@@ -520,8 +521,46 @@ async def list_games(
       重排 + 切片分页（SQLite 无 array_position 的等价实现，其余
       筛选条件照常叠加，与 top100 WHERE 注入语义一致）。
     """
+    if board:
+        # 榜单视图（HoldexarPlus）：任意榜单 × 目录详情，榜序 + 游标分页。
+        # 榜名合法性在路由侧校验（未知 key 404）；top_n 收 1000 给 IN 子句
+        # 与重排字典设界——specials 板封顶 5000，目录缺失的差集本就出不来。
+        return await _list_games_board(
+            board_key=board,
+            top_n=1000,
+            limit=limit,
+            after=after,
+            q=q,
+            region=region,
+            filter_mode=filter_mode,
+            only_discounted=only_discounted,
+            is_lowest=is_lowest,
+            min_rating=min_rating,
+            max_rating=max_rating,
+            min_reviews=min_reviews,
+            max_reviews=max_reviews,
+            min_price=min_price,
+            max_price=max_price,
+            only_hb=only_hb,
+            only_epic=only_epic,
+            only_xgp=only_xgp,
+            flag=flag,
+            gift_mode=gift_mode,
+            gift_sender=gift_sender,
+            gift_receivers=gift_receivers,
+            diff_min_fen=diff_min_fen,
+            diff_max_fen=diff_max_fen,
+            diff_type=diff_type,
+            tolerance_fen=tolerance_fen,
+            strict_lowest=strict_lowest,
+            exclude_dlc=exclude_dlc,
+            wishlist_priority=wishlist_priority,
+            removed=removed,
+        )
     if sort == "top100":
-        return await _list_games_top100(
+        return await _list_games_board(
+            board_key="topsellers",
+            top_n=100,
             limit=limit,
             after=after,
             q=q,
@@ -668,8 +707,10 @@ async def _load_page_prices(session, appid_list: list[int]) -> dict[int, list[Ga
     return price_rows
 
 
-async def _list_games_top100(
+async def _list_games_board(
     *,
+    board_key: str = "topsellers",
+    top_n: int = 100,
     limit: int = 40,
     after: str | None = None,
     q: str | None = None,
@@ -699,20 +740,19 @@ async def _list_games_top100(
     wishlist_priority: bool = False,
     removed: bool = False,
 ) -> dict:
-    """TOP100 热销榜分支（sort=top100 的榜内过滤 + 榜序重排）。
+    """榜单 × 目录详情分支（sort=top100 与 board 视图共用：榜内过滤 + 榜序重排）。
 
     设计：`appid IN (...)` 过滤 + 榜序排序 + SQL 分页。本端 SQLite 无
     array_position → 等价实现：榜集全量拉回后 Python 按榜序重排 + 切片
     分页；筛选条件（地区/价格/元数据）照常叠加。拉取失败（空榜）返回
     空集而非随机游戏。
 
-    展示取榜序前 100：榜单抓取侧已扩到 5 页（初始游戏库的发现面），
-    但本排序项语义仍是「近期TOP100热榜」——多出的名次只服务反哺，
-    不进排序集。
+    榜名与展示上限由调用方定：sort=top100 语义仍是「近期TOP100热榜」
+    （榜内取前 100）；board 视图（HoldexarPlus 增补）top_n 放宽到 1000。
     """
     from app.domains.games import boards as boards_mod
 
-    appids = (await boards_mod.get_board("topsellers"))[:100]
+    appids = (await boards_mod.get_board(board_key))[:top_n]
     if not appids:
         return {"items": [], "total": 0, "hasMore": False, "nextCursor": None}
 

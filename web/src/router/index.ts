@@ -27,6 +27,11 @@ const router = createRouter({
       meta: titleKey('nav.library'),
     },
     {
+      path: '/library/boards',
+      component: () => import('@/views/library/Boards.vue'),
+      meta: titleKey('library.board.title'),
+    },
+    {
       path: '/pilot',
       component: () => import('@/views/pilot/Index.vue'),
       meta: titleKey('nav.pilot'),

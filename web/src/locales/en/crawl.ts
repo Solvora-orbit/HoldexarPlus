@@ -49,6 +49,7 @@ const crawl: Partial<Record<MessageKey, string>> = {
   'crawl.start.specialsTip':
     'Pull the Steam specials + popular board and crawl only new titles not yet in the library (they enter the catalog on first crawl); the automatic price cycle also runs this as its tail segment',
   'crawl.start.specialsStarted': 'Specials crawl started ({count} new titles)',
+  'crawl.start.viewBoard': 'View the board',
   'crawl.stop.button': 'Stop',
   'crawl.stop.requested': 'Stop requested',
   'crawl.stop.none': 'No job is running',

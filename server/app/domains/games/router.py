@@ -23,6 +23,9 @@ class PriceContextBatchRequest(BaseModel):
 @router.get("")
 async def list_games(
     sort: str = Query("default"),
+    # 榜单视图（HoldexarPlus）：specials/topsellers/popularnew/comingsoon——
+    # 榜序 appid join 目录与价格行；未知榜单源 404
+    board: str = Query(""),
     limit: int = Query(40, ge=1, le=100),
     after: str | None = None,
     q: str | None = Query(None, max_length=200),
@@ -63,7 +66,13 @@ async def list_games(
     # 目录移除（假删除）作用域：默认隐藏已移除款；true 只出已移除款（恢复视图）
     removed: bool = False,
 ):
+    if board:
+        from app.domains.games import boards as boards_mod
+
+        if board not in boards_mod.BOARDS:
+            raise HTTPException(status_code=404, detail=f"未知榜单源: {board}")
     return await service.list_games(
+        board=board,
         sort=sort,
         limit=limit,
         after=after,

@@ -9,6 +9,20 @@ const library = {
   /* Navbar 统计条（总数 + 已加载），数字由 useLocaleFormat 预格式化后传入 */
   'library.stats': '共 {total} 款 · 已加载 {loaded}',
 
+  /* ── 榜单视图（/library/boards，HoldexarPlus 增补）── */
+  'library.board.title': '榜单',
+  'library.board.entry': '榜单',
+  'library.board.specials': '特惠榜',
+  'library.board.topsellers': '热销榜',
+  'library.board.popularnew': '热门新品',
+  'library.board.comingsoon': '即将推出',
+  'library.board.desc': '抓取发现的可视化：榜单排名 × 库内价格。新面孔要等抓取落库后才会出现。',
+  'library.board.count': '本榜 {n} 款 · 已加载',
+  'library.board.empty': '榜单为空：还没拉到榜单，或新面孔尚未入目录。去「任务」页跑一轮抓取后回来。',
+  'library.board.gotoCrawl': '去任务页抓取',
+  'library.board.loadMore': '加载更多',
+  'library.board.backToList': '返回找游戏列表',
+
   /* 加载失败（错误消息来自后端，作为参数传入） */
   'library.error.title': '暂时无法加载游戏',
   'library.error.network': '无法连接到服务器',

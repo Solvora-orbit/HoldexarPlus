@@ -59,6 +59,7 @@ const crawl = {
   'crawl.start.specialsTip':
     '拉取 Steam 特惠+热门榜，只抓库外新面孔（爬取落库即完成目录发现）；自动价格轮的尾段也会定时执行同一动作',
   'crawl.start.specialsStarted': '特惠榜抓取已启动（{count} 款新面孔）',
+  'crawl.start.viewBoard': '去看看榜单',
   'crawl.stop.button': '停止',
   'crawl.stop.requested': '已请求停止',
   'crawl.stop.none': '没有运行中的任务',

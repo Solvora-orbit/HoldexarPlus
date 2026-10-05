@@ -1326,6 +1326,8 @@ export interface GameVersionPrices {
 
 export interface GamesListParams {
   sort?: string
+  /** 榜单视图：specials/topsellers/popularnew/comingsoon——榜序 appid join 目录与价格行 */
+  board?: string
   limit?: number
   after?: string | null
   q?: string
