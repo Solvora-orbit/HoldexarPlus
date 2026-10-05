@@ -6,7 +6,6 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
-import { Refresh } from '@element-plus/icons-vue'
 
 import {
   RATE_RANGES,
@@ -376,9 +375,10 @@ onMounted(async () => {
             }}
           </div>
         </div>
-        <el-button type="primary" :icon="Refresh" :loading="refreshing" @click="refresh">
+        <HlButton :loading="refreshing" @click="refresh">
+          <HlIcon name="refresh" />
           {{ t('rates.action.refresh') }}
-        </el-button>
+        </HlButton>
       </div>
 
       <div class="tracked-row">

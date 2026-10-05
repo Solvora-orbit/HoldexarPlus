@@ -2,8 +2,6 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { Delete, Edit, Plus, Search } from '@element-plus/icons-vue'
-
 import {
   alertsApi,
   ratesApi,
@@ -409,7 +407,7 @@ onMounted(() => {
           @keyup.enter="searchGames"
           @input="selectedGame = null"
         />
-        <el-button :loading="searching" @click="searchGames">{{ t('alerts.rules.search') }}</el-button>
+        <HlButton :loading="searching" @click="searchGames">{{ t('alerts.rules.search') }}</HlButton>
       </div>
 
       <!-- 搜索结果下拉 -->
@@ -432,7 +430,7 @@ onMounted(() => {
       <div v-if="selectedGame" class="selected-game">
         <span class="selected-name">{{ selectedGame.name || selectedGame.nameEn }}</span>
         <span class="selected-appid">AppID: {{ selectedGame.appid }}</span>
-        <el-button size="small" text @click="clearSearch">{{ t('alerts.rules.clear') }}</el-button>
+        <HlButton variant="text" size="sm" @click="clearSearch">{{ t('alerts.rules.clear') }}</HlButton>
       </div>
 
       <!-- 规则条件 -->
@@ -448,7 +446,7 @@ onMounted(() => {
           </el-input>
         </HlTooltip>
         <span v-else class="section-desc" style="display: inline; margin: 0">{{ targetText }}</span>
-        <el-button type="primary" :icon="Plus" @click="add">{{ t('alerts.rules.add') }}</el-button>
+        <HlButton @click="add"><HlIcon name="plus" /> {{ t('alerts.rules.add') }}</HlButton>
       </div>
     </div>
 
@@ -498,8 +496,8 @@ onMounted(() => {
         <el-table-column :label="t('alerts.table.actions')" width="120" align="right">
           <template #default="{ row }">
             <div class="action-btns">
-              <el-button size="small" plain :icon="Edit" @click="startEdit(row)" />
-              <el-button size="small" type="danger" plain :icon="Delete" @click="remove(row)" />
+              <HlButton size="sm" @click="startEdit(row)"><HlIcon name="edit" /></HlButton>
+              <HlButton size="sm" variant="danger" @click="remove(row)"><HlIcon name="delete" /></HlButton>
             </div>
           </template>
         </el-table-column>
@@ -529,8 +527,8 @@ onMounted(() => {
             </el-input>
           </HlTooltip>
           <HlSelect v-model="editForm.region" :options="regionSelectOptions" class="edit-region" />
-          <el-button size="small" type="primary" @click="saveEdit(alerts.find(a => a.id === editingId)!)">{{ t('alerts.rules.save') }}</el-button>
-          <el-button size="small" @click="cancelEdit">{{ t('common.cancel') }}</el-button>
+          <HlButton size="sm" @click="saveEdit(alerts.find(a => a.id === editingId)!)">{{ t('alerts.rules.save') }}</HlButton>
+          <HlButton art="outline" size="sm" @click="cancelEdit">{{ t('common.cancel') }}</HlButton>
         </div>
       </div>
     </div>
@@ -539,16 +537,15 @@ onMounted(() => {
     <div class="card section-card" data-section="alerts.section.history">
       <div class="history-head">
         <div class="section-title">{{ t('alerts.section.history') }}</div>
-        <el-button
+        <HlButton
           v-if="events.length"
-          size="small"
-          type="danger"
-          plain
-          :icon="Delete"
+          size="sm"
+          variant="danger"
           @click="clearAllEvents"
         >
+          <HlIcon name="delete" />
           {{ t('alerts.history.clearAll') }}
-        </el-button>
+        </HlButton>
       </div>
       <el-table v-if="events.length" :data="events" style="width: 100%" size="small" max-height="280">
         <el-table-column :label="t('alerts.table.time')" width="160">
@@ -593,7 +590,7 @@ onMounted(() => {
         </el-table-column>
         <el-table-column :label="t('alerts.table.actions')" width="70" align="right">
           <template #default="{ row }">
-            <el-button size="small" type="danger" plain :icon="Delete" @click="removeEvent(row)" />
+            <HlButton size="sm" variant="danger" @click="removeEvent(row)"><HlIcon name="delete" /></HlButton>
           </template>
         </el-table-column>
       </el-table>
@@ -651,8 +648,8 @@ onMounted(() => {
         </div>
       </el-form>
       <div class="smtp-footer">
-        <el-button :loading="smtpTesting" @click="testSmtp">{{ t('alerts.smtp.test') }}</el-button>
-        <el-button type="primary" :loading="smtpSaving" @click="saveSmtp">{{ t('alerts.smtp.save') }}</el-button>
+        <HlButton :loading="smtpTesting" @click="testSmtp">{{ t('alerts.smtp.test') }}</HlButton>
+        <HlButton :loading="smtpSaving" @click="saveSmtp">{{ t('alerts.smtp.save') }}</HlButton>
       </div>
     </div>
   </section>

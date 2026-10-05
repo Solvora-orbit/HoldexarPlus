@@ -845,15 +845,10 @@ onBeforeUnmount(() => {
             <HlIcon name="setting" />
             {{ t('crawl.owned.acctSet') }}
           </HlButton>
-          <el-button
-            type="primary"
-            size="small"
-            :loading="savingOwned"
-            @click="saveOwnedRegions"
-          >
+          <HlButton :loading="savingOwned" @click="saveOwnedRegions">
             <HlIcon v-if="!savingOwned" name="check" />
             {{ t('crawl.action.save') }}
-          </el-button>
+          </HlButton>
         </div>
       </div>
 

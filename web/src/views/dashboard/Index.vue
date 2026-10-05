@@ -534,9 +534,9 @@ onMounted(() => {
         <div v-if="cycleDigest" class="card section-card" data-section="priceEvent.cycle.title">
           <div class="section-header">
             <div class="section-title">{{ t('priceEvent.cycle.title') }}</div>
-            <el-button size="small" text @click="router.push('/library')">
+            <HlButton variant="text" size="sm" @click="router.push('/library')">
               {{ t('priceEvent.cycle.more') }} →
-            </el-button>
+            </HlButton>
           </div>
 
           <p v-if="cycleDigest.events === 0" class="cycle-digest__empty">
@@ -582,9 +582,9 @@ onMounted(() => {
               <el-icon><Select /></el-icon>
               {{ t('dashboard.section.priceMoves') }}
             </div>
-            <el-button size="small" text @click="router.push('/library')">
+            <HlButton variant="text" size="sm" @click="router.push('/library')">
               {{ t('dashboard.action.viewAll') }} →
-            </el-button>
+            </HlButton>
           </div>
 
           <HlEmpty
@@ -659,9 +659,9 @@ onMounted(() => {
               <el-icon><DataLine /></el-icon>
               {{ t('dashboard.section.rates') }}
             </div>
-            <el-button size="small" text @click="router.push('/rates')">
+            <HlButton variant="text" size="sm" @click="router.push('/rates')">
               {{ t('dashboard.action.viewAll') }} →
-            </el-button>
+            </HlButton>
           </div>
 
           <HlEmpty
