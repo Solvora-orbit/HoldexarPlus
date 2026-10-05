@@ -17,6 +17,12 @@
 
 ---
 
+> [!NOTE]
+> **HoldexarPlus** 是基于 [**GLrone/Holdexar**](https://github.com/GLrone/Holdexar) 创建的独立分支版本，由 [@Solvora-orbit](https://github.com/Solvora-orbit) 独立维护与更新，与原项目无隶属关系，后续改动均不代表原项目。
+> 本项目沿用原项目的 [**GPL-3.0**](LICENSE) 许可证开源，原项目版权归 [GLrone](https://github.com/GLrone) 所有，感谢原作者的贡献。
+
+---
+
 # 使用手册（写给玩家）
 
 ## 这是什么？
