@@ -45,7 +45,7 @@ NOW = datetime.now()
 def test_all_mails_share_theme(builder):
     """三封邮件同一深色主题骨架：品牌头 + 主卡 + 页脚 + 关键色。"""
     html = builder()
-    for needle in ("Holdexar", "STEAM 多区价格监控终端",
+    for needle in ("HoldexarPlus", "STEAM 多区价格监控终端",
                    "#66c0f4", "#1b2838", "#0e1a27", "border-radius:14px"):
         assert needle in html, f"{needle} 缺失"
 

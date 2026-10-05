@@ -5,7 +5,7 @@ import type { MessageKey } from '../zh-CN'
 
 const fetchPage: Partial<Record<MessageKey, string>> = {
   'fetch.desc':
-    "Holdexar keeps the content below up to date for you over the network. Turn off whatever you don't need: data already fetched stays, and manual refresh keeps working.",
+    "HoldexarPlus keeps the content below up to date for you over the network. Turn off whatever you don't need: data already fetched stays, and manual refresh keeps working.",
   'fetch.epic.label': 'Epic free games',
   'fetch.epic.desc':
     'The Epic Games Store often gives away free games. Keep this on and the home page shows what you can claim for free right now.',

@@ -7,9 +7,11 @@ UPSTREAM_REPO → 上游原仓库（只读自举资产，如汇率种子；非�
 MANIFEST_*  → 更新清单的固定落点（客户端检查更新与发布脚本共用同一地址）
 """
 
-APP_NAME = "Holdexar"
+APP_NAME = "HoldexarPlus"
 APP_SUBTITLE = "Steam 多区价格监控终端"
-APP_SLUG = APP_NAME.lower()
+# slug 保持 "holdexar"：数据目录（%LOCALAPPDATA%\holdexar[-dev]）、库文件名、
+# 环境变量前缀 HOLDEXAR_ 全部沿用——显示名升级为 Plus，本地数据不迁移不丢失
+APP_SLUG = "holdexar"
 
 # 版本号：**全项目唯一来源**（config.Settings.version 只是把它接进 pydantic 设置，
 # 便于环境变量覆盖；发布脚本读的也是这里）。发版时只改这一行。

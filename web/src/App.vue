@@ -321,7 +321,7 @@ onMounted(() => document.addEventListener('click', onDocClickClose))
 
 const profile = computed(() => accountStore.status?.profile ?? null)
 const avatarSrc = computed(() => profile.value?.avatar_url || '/assets/logo_steam.png')
-const avatarName = computed(() => profile.value?.persona_name || 'Holdexar')
+const avatarName = computed(() => profile.value?.persona_name || 'HoldexarPlus')
 
 /** 弹层内手动刷新当前账号余额（60s 轮询静默，这里给气泡反馈） */
 async function manualRefreshWallet() {

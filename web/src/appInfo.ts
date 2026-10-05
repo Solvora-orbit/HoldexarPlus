@@ -1,6 +1,8 @@
 /** 应用元信息：唯一的品牌常量来源（改名只改这里）。 */
-export const APP_NAME = 'Holdexar'
-export const APP_SLUG = APP_NAME.toLowerCase()
+export const APP_NAME = 'HoldexarPlus'
+// slug 保持 'holdexar'：localStorage 键（holdexar.theme / holdexar.locale / …）
+// 全部沿用——显示名升级为 Plus，用户偏好不因改名丢失
+export const APP_SLUG = 'holdexar'
 
 /** 主题（当前固定深色；支持浅色后由主题状态决定） */
 export const THEME = 'dark' as 'dark' | 'light'

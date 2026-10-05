@@ -2,7 +2,7 @@
 
 <br>
 
-# Holdexar
+# HoldexarPlus
 
 **本地 Steam 多区价格监控终端**
 
@@ -39,8 +39,8 @@
 
 ### 第 1 步：下载并打开
 
-1. 到 [Releases](../../releases) 页面下载 `Holdexar-win64-v<版本>.zip`；
-2. 解压到任意文件夹，双击 `Holdexar/Holdexar.exe`；
+1. 到 [Releases](../../releases) 页面下载 `HoldexarPlus-win64-v<版本>.zip`；
+2. 解压到任意文件夹，双击 `HoldexarPlus/HoldexarPlus.exe`；
 3. 第一次打开会弹出安全提示（未签名程序的正常现象，不是病毒），点「更多信息 → 仍要运行」即可，详见下方[安全提示](#首次运行安全提示)。
 
 打开后会有一遍新手导览，跟着「下一步」走就行，随时可以跳过。
@@ -150,7 +150,7 @@ Windows 对未签名程序的标准提示，与病毒无关。点 **更多信息
 - 换装只替换程序文件，用户数据、账号绑定、价格历史一概不动；换装中断会自动回滚到原版本并重新打开应用。
 - 也可以手动下载新版解压覆盖，数据不受影响。
 
-**Scoop 渠道**（便携应用，不写注册表、不装服务）：
+**Scoop 渠道**（便携应用，不写注册表、不装服务；fork 暂沿用上游 bucket，后续可切换自有渠道）：
 
 ```powershell
 scoop bucket add holdexar https://github.com/GLrone/scoop-bucket
@@ -196,8 +196,8 @@ Monitor Pool → Price Refresh Cycle → Price Observation
 要求 Python ≥3.13、Node ≥ 20.19(或 ≥ 22.12;Vite 8 的 `engines` 要求):
 
 ```bash
-git clone https://github.com/GLrone/Holdexar.git
-cd Holdexar
+git clone https://github.com/Solvora-orbit/HoldexarPlus.git
+cd HoldexarPlus
 python run.py            # 自动建 venv → 装依赖 → 构建前端 → 拉起桌面窗口
 ```
 

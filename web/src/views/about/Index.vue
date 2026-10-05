@@ -41,8 +41,8 @@ onMounted(async () => {
 
 const version = computed(() => info.value?.version ?? '')
 
-/** 本项目的 GitHub 仓库（外链专名，不翻译）。 */
-const REPO_URL = 'https://github.com/GLrone/Holdexar'
+/** 本项目的 GitHub 仓库（外链专名，不翻译）：fork 后指向本仓库。 */
+const REPO_URL = 'https://github.com/Solvora-orbit/HoldexarPlus'
 /** 运行时长：分档文案走词典。t() 在 computed 里现取，切语言即重算——
  *  若把结果写进 ref（如模块级常量）会把语言冻在求值那一刻。 */
 const uptime = computed(() => {

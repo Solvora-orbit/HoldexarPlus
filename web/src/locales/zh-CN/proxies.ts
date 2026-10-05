@@ -51,7 +51,7 @@ const proxies = {
 
   /* 自动维护开关（内核自启 / 定期体检；手动检测不受闸） */
   'proxies.auto.autostartLabel': '随服务自启内核',
-  'proxies.auto.autostartHint': '启动 Holdexar 时自动拉起 Clash 内核；关闭后需要在网络页手动启动',
+  'proxies.auto.autostartHint': '启动 HoldexarPlus 时自动拉起 Clash 内核；关闭后需要在网络页手动启动',
   'proxies.auto.healthLabel': '自动节点体检',
   'proxies.auto.healthHint': '定期检测节点可用性并更新走线；关闭后可随时点「检测节点」手动测',
   'proxies.auto.failed': '保存失败，请重试',

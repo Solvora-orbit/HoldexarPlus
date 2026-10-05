@@ -158,7 +158,7 @@ async def _clean(db):
 def test_new_mails_share_theme(builder):
     """六类新邮件与存量三封同一深色骨架：品牌头 + 主卡 + 页脚 + 关键色。"""
     html = builder()
-    for needle in ("Holdexar", "STEAM 多区价格监控终端",
+    for needle in ("HoldexarPlus", "STEAM 多区价格监控终端",
                    "#66c0f4", "#1b2838", "#0e1a27", "border-radius:14px"):
         assert needle in html, f"{needle} 缺失"
 

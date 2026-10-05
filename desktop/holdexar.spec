@@ -79,7 +79,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="Holdexar",
+    name="HoldexarPlus",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -93,4 +93,4 @@ exe = EXE(
     icon=["app.ico"],
 )
 
-coll = COLLECT(exe, a.binaries, a.datas, name="Holdexar")
+coll = COLLECT(exe, a.binaries, a.datas, name="HoldexarPlus")
