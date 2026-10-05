@@ -20,9 +20,10 @@ const pool: Partial<Record<MessageKey, string>> = {
   'pool.section.regions': 'Watched regions',
   'pool.section.items': 'Tracked items',
 
-  /* Steam accounts section */
+  /* Steam accounts section (read-only here; bind/sync/unbind live in Settings) */
   'pool.account.desc':
-    'Binding syncs the account\u2019s wishlist and owned games into the watch pool (the profile must be public) — the data source for crawls.',
+    'The data source for crawls: bound accounts sync their wishlist and owned games into the watch pool (profiles must be public). Manage binding and syncing in Settings.',
+  'pool.account.manageInSettings': 'Manage in Settings',
   'pool.account.steamidPlaceholder': 'Steam friend code / SteamID64 / profile URL',
   'pool.account.labelPlaceholder': 'Label (optional)',
   'pool.account.bind': 'Bind',

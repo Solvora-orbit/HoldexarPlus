@@ -23,7 +23,7 @@ const famLib = {
   'famLib.empty.bindHint': '绑定后点家庭页顶部「⟳ 同步家庭组」，家庭库将自动聚合共享清单与成员已购',
   'famLib.empty.loading': '家庭库数据拉取中…',
   'famLib.empty.noData': '暂无家庭库数据',
-  'famLib.empty.noDataHint': '加入 Steam 家庭组并点「⟳ 同步家庭组」后，此处展示共享库 ∪ 成员已购',
+  'famLib.empty.noDataHint': '加入 Steam 家庭组并点「⟳ 同步家庭组」后，此处展示共享库 ∪ 成员已购；首次建库要逐成员拉取，可能需要几分钟到半小时，期间本页为空属正常',
 
   /* ── 6 张 KPI 卡 ── */
   'famLib.kpi.total': '家庭库游戏总数',

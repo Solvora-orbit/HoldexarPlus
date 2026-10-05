@@ -18,7 +18,6 @@ import {
   HlImg,
   HlInput,
   HlPagination,
-  HlPopconfirm,
   HlSkeleton,
   HlTable,
   HlTextarea,
@@ -44,10 +43,7 @@ const regionsStore = useRegionsStore()
 
 const accounts = ref<TrackedAccount[]>([])
 const items = ref<PoolItemPayload[]>([])
-const newSteamid = ref('')
-const newLabel = ref('')
 const loading = ref(true)
-const syncingId = ref<string | null>(null)
 let personaRetries = 0
 
 // ─── 监控条目类别（关注 / 愿望单 / 已购 / 榜单 / 手动添加）─────────
@@ -151,12 +147,12 @@ function acctCode(a: TrackedAccount): string {
   return acctName(a) === code ? '' : t('pool.account.friendCode', { code })
 }
 
-/** 账户表列定义（HlTable：声明式列 + 插槽渲染） */
+/** 账户表列定义（HlTable：声明式列 + 插槽渲染）。
+ *  账号管理（绑定/同步/解绑）收敛在「设置」页：本表只读展示数据源构成。 */
 const accountCols = computed<HlTableColumn[]>(() => [
   { key: 'account', label: t('pool.account.colAccount') },
   { key: 'itemCount', label: t('pool.account.colItemCount'), numeric: true },
   { key: 'lastSync', label: t('pool.account.colLastSync') },
-  { key: 'actions', label: t('pool.account.colActions') },
 ])
 
 /** HlTable 的行数据：接口字段渲染期组装（切语言时表头随 computed 重算） */
@@ -167,7 +163,6 @@ const accountRows = computed(() =>
     lastSync: a.lastSyncAt
       ? a.lastSyncAt.slice(0, 19).replace('T', ' ')
       : t('pool.account.neverSynced'),
-    actions: a,
   })),
 )
 
@@ -203,50 +198,6 @@ function schedulePersonaRefetch() {
     }
     schedulePersonaRefetch()
   }, 5000)
-}
-
-async function add() {
-  const raw = newSteamid.value.trim()
-  if (!raw) return
-  try {
-    const res = await watchPoolApi.add(raw, newLabel.value.trim())
-    message.success(
-      t('pool.account.bindSuccess', { code: res.friendCode || toFriendCode(res.steamid) }),
-    )
-    newSteamid.value = ''
-    newLabel.value = ''
-    await load()
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
-  }
-}
-
-async function sync(account: TrackedAccount) {
-  syncingId.value = account.steamid
-  try {
-    const res = await watchPoolApi.sync(account.steamid)
-    if (res.added > 0) {
-      // 是否自动开爬决定整句（两条独立词条，不在组件侧拼分句）
-      message.success(
-        res.crawlTriggered
-          ? t('pool.account.syncAddedCrawling', { n: res.added })
-          : t('pool.account.syncAdded', { n: res.added }),
-      )
-    } else {
-      message.info(t('pool.account.syncNoNew', { n: res.wishlistCount }))
-    }
-    await load()
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
-  } finally {
-    syncingId.value = null
-  }
-}
-
-async function remove(account: TrackedAccount) {
-  await watchPoolApi.remove(account.steamid)
-  message.success(t('pool.account.unbindSuccess'))
-  await load()
 }
 
 // ─── 监控池管理：添加条目（单个 / 批量粘贴 / 导入文件）──────
@@ -470,29 +421,17 @@ onMounted(async () => {
 
 <template>
   <section class="pool-page">
-    <!-- Steam 账户（监控池数据源） -->
+    <!-- Steam 账户（监控池数据源）：只读展示——绑定/登录/同步/解绑统一在「设置」页管理 -->
     <div class="card section-card" data-section="pool.section.steamAccount">
-      <div class="section-title">{{ t('pool.section.steamAccount') }}</div>
-      <div class="section-desc">
-        {{ t('pool.account.desc') }}
-      </div>
-
-      <div class="add-row">
-        <HlInput
-          v-model="newSteamid"
-          :placeholder="t('pool.account.steamidPlaceholder')"
-          class="add-row__input"
-          @keydown.enter="add"
-        />
-        <HlInput
-          v-model="newLabel"
-          :placeholder="t('pool.account.labelPlaceholder')"
-          class="add-row__label"
-          @keydown.enter="add"
-        />
-        <HlButton variant="primary" size="sm" @click="add">
-          <HlIcon name="plus" :size="14" />
-          {{ t('pool.account.bind') }}
+      <div class="section-card__header">
+        <div>
+          <div class="section-title">{{ t('pool.section.steamAccount') }}</div>
+          <div class="section-desc">
+            {{ t('pool.account.desc') }}
+          </div>
+        </div>
+        <HlButton size="sm" @click="router.push('/settings')">
+          {{ t('pool.account.manageInSettings') }}
         </HlButton>
       </div>
 
@@ -516,28 +455,6 @@ onMounted(async () => {
           </template>
           <template #lastSync="{ row }">
             <span class="acct-sync">{{ row.lastSync }}</span>
-          </template>
-          <template #actions="{ row }">
-            <div class="acct-actions">
-              <HlButton
-                variant="primary"
-                size="sm"
-                :loading="syncingId === row.account.steamid"
-                @click="sync(row.account)"
-              >
-                {{ t('pool.account.sync') }}
-              </HlButton>
-              <HlPopconfirm
-                :text="t('pool.account.unbindConfirm', { name: acctName(row.account) })"
-                :confirm-label="t('common.confirm')"
-                :cancel-label="t('common.cancel')"
-                @confirm="remove(row.account)"
-              >
-                <HlButton variant="danger" size="sm" :title="t('pool.account.unbindSuccess')">
-                  <HlIcon name="delete" :size="14" />
-                </HlButton>
-              </HlPopconfirm>
-            </div>
           </template>
         </HlTable>
         <HlEmpty

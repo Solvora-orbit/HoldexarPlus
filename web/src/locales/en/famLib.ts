@@ -24,7 +24,7 @@ const famLib: Partial<Record<MessageKey, string>> = {
   'famLib.empty.loading': 'Loading family library…',
   'famLib.empty.noData': 'No family library data',
   'famLib.empty.noDataHint':
-    'After joining a Steam Family and clicking “⟳ Sync family”, this view shows the shared library ∪ members’ owned games.',
+    'After joining a Steam Family and clicking “⟳ Sync family”, this view shows the shared library ∪ members’ owned games. The first build walks every member and can take minutes up to half an hour — an empty view during that window is normal.',
 
   /* KPI cards */
   'famLib.kpi.total': 'Family library games',

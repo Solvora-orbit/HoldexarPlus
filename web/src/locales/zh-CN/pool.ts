@@ -29,9 +29,10 @@ const pool = {
   'pool.section.regions': '监控地区',
   'pool.section.items': '监控条目',
 
-  /* ── Steam 账户分节 ── */
+  /* ── Steam 账户分节（只读展示；绑定/同步/解绑统一在「设置」页管理）── */
   'pool.account.desc':
-    '绑定后自动同步该账户的愿望单与已购游戏库进监控池（需对方资料公开），作为爬取的数据源。',
+    '监控池的数据源构成：绑定账户自动同步愿望单与已购游戏库进池（需对方资料公开）。绑定与同步统一在「设置」页管理。',
+  'pool.account.manageInSettings': '到设置页管理',
   'pool.account.steamidPlaceholder': 'Steam 好友码 / SteamID64 / 个人资料 URL',
   'pool.account.labelPlaceholder': '备注名（可选）',
   'pool.account.bind': '绑定',
