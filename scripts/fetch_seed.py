@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
 
-from app.core.app_info import GITHUB_REPO  # noqa: E402
+from app.core.app_info import UPSTREAM_REPO  # noqa: E402
 
 SEED_DIR = ROOT / "assets" / "seed"
 SEED_DB = SEED_DIR / "holdexar_seed.db"
@@ -41,7 +41,9 @@ def asset_url(mirror: str = "") -> str:
     更新清单 Release（tag `updater`）以 `--latest=false` 创建，不会被标成
     Latest release，所以这里的 latest 不会被它顶掉——这条地址可以长期不变。
     """
-    return f"{mirror}https://github.com/{GITHUB_REPO}/releases/latest/download/{ASSET_NAME}"
+    # UPSTREAM_REPO（原仓库）而非 GITHUB_REPO（本 fork）：种子是只读自举资产，
+    # 本 fork 尚无 Release，latest 会 404；上游的 latest 长期可用且内容公共。
+    return f"{mirror}https://github.com/{UPSTREAM_REPO}/releases/latest/download/{ASSET_NAME}"
 
 
 def seed_ok(path: Path) -> tuple[bool, str]:

@@ -2,7 +2,8 @@
 
 APP_NAME  → 界面标题 / FastAPI title / 窗口标题
 APP_SLUG  → 数据库文件名 / 日志文件名 / 数据目录名 / 环境变量前缀
-GITHUB_REPO → 发布仓库（应用自更新 + 资产种子获取共用，fork 后只改这里）
+GITHUB_REPO → 发布仓库（应用自更新唯一来源，fork 后只改这里）
+UPSTREAM_REPO → 上游原仓库（只读自举资产，如汇率种子；非更新链路）
 MANIFEST_*  → 更新清单的固定落点（客户端检查更新与发布脚本共用同一地址）
 """
 
@@ -14,10 +15,19 @@ APP_SLUG = APP_NAME.lower()
 # 便于环境变量覆盖；发布脚本读的也是这里）。发版时只改这一行。
 # 放在 app_info 而非 config：config 要 import pydantic，而发布/构建脚本、
 # run.py、desktop/main.py 需要在装依赖之前就能取到版本号。
-APP_VERSION = "0.1.0-beta.2"
+# fork 版本方案：0.1.1-plus.N——semver 预发布段按 N 递增可比，基线 0.1.1-plus.1
+# 严格大于原版 0.1.0 系（0.1.1 > 0.1.0），此后每次对外发布递增 plus.N。
+APP_VERSION = "0.1.1-plus.1"
 
-# 发布仓库（owner/repo）：更新检查与种子资产下载共用一个来源，勿在两处各写一遍
-GITHUB_REPO = "GLrone/Holdexar"
+# 发布仓库（owner/repo）：应用内自更新清单、发布脚本（release/publish/build_manifest）
+# 与 /info 展示的唯一来源。HoldexarPlus fork 基线：只认本仓库的发布——原作者发新版
+# 不会再影响本应用（fork 尚无 Release 时，更新检查按「资产不存在」优雅报无更新）。
+GITHUB_REPO = "Solvora-orbit/HoldexarPlus"
+
+# 上游原仓库：**只**用于只读的公开静态资产（fetch_seed.py 的汇率档案种子等自举
+# 数据），不是更新链路——上游发新版不会进入本应用。等本仓库开始随发布自行导出
+# 种子资产后，可把 fetch_seed.py 切回 GITHUB_REPO 并删除此常量。
+UPSTREAM_REPO = "GLrone/Holdexar"
 
 # 更新清单落在一个**固定 tag** 的 Release 资产下，与版本号解耦：
 # 客户端检查更新永远只读这一个地址，不打 api.github.com（免限速、国内可达）。
