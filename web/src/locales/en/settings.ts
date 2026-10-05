@@ -18,6 +18,37 @@ const settings: Partial<Record<MessageKey, string>> = {
   'settings.section.backup': 'Backups',
   'settings.section.update': 'App updates',
   'settings.section.tour': 'Guided tour',
+  'settings.section.help': 'Help & diagnostics',
+
+  /* Help & diagnostics card */
+  'settings.help.desc': 'Quick answers and runtime diagnostics. The data directory shown here is the store this run actually reads and writes — check it first when changed settings seem to have vanished.',
+  'settings.help.faqDirectQ': 'The STEAM store link does not open in Direct mode?',
+  'settings.help.faqDirectA':
+    'In Direct mode the browser reaches the Steam store on its own — on mainland networks that usually fails. It is a network reality, not an app fault. Switch back to "Proxy first" on the Network page, or let a game booster / local proxy take over the browser traffic.',
+  'settings.help.faqNoExitQ': 'Crawl says "no usable exit in the proxy pool"?',
+  'settings.help.faqNoExitA':
+    'That job needs pool exits but no node is enabled. Check subscriptions and node state on the Network page; if you do not want the pool at all, set the routing policy to "Direct only" or "Direct first" — both run on your local network.',
+  'settings.help.faqDataDirQ': 'Changed settings or data "disappeared"?',
+  'settings.help.faqDataDirA':
+    'Different launch methods may use different data directories (dev holdexar-dev and packaged holdexar are isolated on purpose). Confirm the "Data directory" below matches your previous launch before assuming data is gone.',
+  'settings.help.version': 'Version',
+  'settings.help.strategy': 'Current routing policy',
+  'settings.help.dataDir': 'Data directory',
+  'settings.help.copy': 'Copy',
+  'settings.help.copied': 'Copied to clipboard',
+  'settings.help.copyFailed': 'Copy failed — please select and copy manually',
+  'settings.help.openLogs': 'Open logs',
+  'settings.help.wipeLabel': 'Danger zone',
+  'settings.help.wipeButton': 'Delete all local data',
+  'settings.help.wipeTitle': 'Delete all local data',
+  'settings.help.wipeBody': 'The following local data will be deleted permanently:',
+  'settings.help.wipeItem1': 'Game library with all prices and history',
+  'settings.help.wipeItem2': 'Wishlist, owned-library sync and the watch pool',
+  'settings.help.wipeItem3': 'Account bindings and credentials (re-bind required afterwards)',
+  'settings.help.wipeItem4': 'Alert rules, notifications and every app setting',
+  'settings.help.wipeConsent': 'I understand this data will be deleted permanently and cannot be recovered',
+  'settings.help.wipeConfirm': 'Delete everything',
+  'settings.help.wipeDone': 'All local data deleted — restart the app now to start fresh',
 
   /* Steam account binding card */
   'settings.steam.desc': 'Binding an account shows its wallet balance (top right) plus billing currency and region. Only the sign-in Cookie fields are kept — including steamRefresh_steam, which renews the session automatically — stored encrypted in the local database only.',

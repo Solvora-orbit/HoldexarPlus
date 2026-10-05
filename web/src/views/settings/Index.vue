@@ -6,6 +6,7 @@ import { currencyName } from '@/api/currencies'
 import {
   accountLoginApi,
   notificationsApi,
+  proxiesApi,
   settingsApi,
   pilotApi,
   systemApi,
@@ -50,6 +51,84 @@ const tour = useTourStore()
 const router = useRouter()
 function openToolbox() {
   void router.push('/toolbox')
+}
+
+/* ── 帮助与诊断 ──
+   FAQ 键表（q/a 都是 i18n key）；诊断数据来自 GET /info（version/data_dir）
+   与 GET /proxies（当前路由策略）。data_dir 是「改过的设置像消失了一样」类
+   问题的一线证据：不同启动方式的数据目录不同（开发态 holdexar-dev 与打包态
+   holdexar 物理隔离），改的库和看的库可能不是同一个——可视化即止血。 */
+const HELP_FAQ = [
+  { q: 'settings.help.faqDirectQ', a: 'settings.help.faqDirectA' },
+  { q: 'settings.help.faqNoExitQ', a: 'settings.help.faqNoExitA' },
+  { q: 'settings.help.faqDataDirQ', a: 'settings.help.faqDataDirA' },
+] as const
+const diag = ref<Awaited<ReturnType<typeof systemApi.info>> | null>(null)
+const diagStrategy = ref<string | null>(null)
+
+async function loadHelpDiagnostics() {
+  try {
+    diag.value = await systemApi.info()
+  } catch {
+    /* 诊断信息拿不到就不显示，不打断设置页主流程 */
+  }
+  try {
+    diagStrategy.value = (await proxiesApi.list()).strategy.strategy
+  } catch {
+    /* 同上：策略显示保持「—」 */
+  }
+}
+
+const strategyText = computed(() => {
+  const map: Record<string, string> = {
+    proxy_first: t('proxies.strategy.proxyFirst.label'),
+    direct_only: t('proxies.strategy.directOnly.label'),
+    direct_first: t('proxies.strategy.directFirst.label'),
+    proxy_only: t('proxies.strategy.proxyOnly.label'),
+  }
+  return (diagStrategy.value && map[diagStrategy.value]) || '—'
+})
+
+async function copyDataDir() {
+  const p = diag.value?.data_dir
+  if (!p) return
+  try {
+    await navigator.clipboard.writeText(p)
+    message.success(t('settings.help.copied'))
+  } catch {
+    message.error(t('settings.help.copyFailed'))
+  }
+}
+
+function openLogs() {
+  void router.push('/logs')
+}
+
+/* ── 删除本地全部数据（帮助卡内危险区，不单开分区）──
+   前端红字勾选 + 后端 confirm 逐字校验双保险；爬取进行中后端 409 拒绝 */
+const WIPE_ITEMS = [
+  'settings.help.wipeItem1',
+  'settings.help.wipeItem2',
+  'settings.help.wipeItem3',
+  'settings.help.wipeItem4',
+] as const
+const wipeDialogOpen = ref(false)
+const wipeConsent = ref(false)
+const wiping = ref(false)
+
+async function confirmWipe() {
+  if (wiping.value || !wipeConsent.value) return
+  wiping.value = true
+  try {
+    await systemApi.wipeData()
+    wipeDialogOpen.value = false
+    wipeConsent.value = false
+    message.success(t('settings.help.wipeDone'))
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    wiping.value = false
+  }
 }
 
 const steamId = ref('')
@@ -1168,6 +1247,7 @@ onMounted(() => {
   void loadPilot()
   void loadSecurity()
   void loadExports()
+  void loadHelpDiagnostics()
   /* 登录会话在后端存续：进页先对状态快照，进行中就恢复状态卡并续上轮询 */
   void refreshLoginState().then(() => {
     if (loginActive.value) startLoginPolling()
@@ -2172,6 +2252,50 @@ onUnmounted(stopLoginPolling)
         <div class="section-desc">{{ t('settings.toolbox.desc') }}</div>
         <HlButton size="sm" @click="openToolbox">{{ t('settings.toolbox.open') }}</HlButton>
       </div>
+
+      <!-- 帮助与诊断：常见问题速查 + 快捷诊断。数据目录可视化是「改了 A 库
+           看 B 库」类问题（如路由策略看起来自己跳回）的一线诊断入口——
+           这里显示的路径即本次运行真正读写的库所在 -->
+      <div class="card settings-card" data-section="settings.section.help">
+        <div class="section-title">{{ t('settings.section.help') }}</div>
+        <div class="section-desc">{{ t('settings.help.desc') }}</div>
+
+        <details v-for="f in HELP_FAQ" :key="f.q" class="help-faq__item">
+          <summary>{{ t(f.q) }}</summary>
+          <p>{{ t(f.a) }}</p>
+        </details>
+
+        <div class="help-diag">
+          <div class="help-diag__row">
+            <span class="help-diag__label">{{ t('settings.help.version') }}</span>
+            <span class="help-diag__value">{{ diag?.version ?? '—' }}</span>
+          </div>
+          <div class="help-diag__row">
+            <span class="help-diag__label">{{ t('settings.help.strategy') }}</span>
+            <span class="help-diag__value">{{ strategyText }}</span>
+          </div>
+          <div class="help-diag__row">
+            <span class="help-diag__label">{{ t('settings.help.dataDir') }}</span>
+            <span class="help-diag__value help-diag__value--path" :title="diag?.data_dir">
+              {{ diag?.data_dir ?? '—' }}
+            </span>
+            <HlButton variant="text" size="sm" :disabled="!diag?.data_dir" @click="copyDataDir">
+              {{ t('settings.help.copy') }}
+            </HlButton>
+          </div>
+          <HlButton art="outline" size="sm" @click="openLogs">
+            {{ t('settings.help.openLogs') }}
+          </HlButton>
+
+          <!-- 危险区（按需求并入本卡、不单开分区）：删除本地全部数据 -->
+          <div class="help-danger">
+            <span class="help-danger__label">{{ t('settings.help.wipeLabel') }}</span>
+            <HlButton art="outline" tone="red" size="sm" @click="wipeDialogOpen = true">
+              {{ t('settings.help.wipeButton') }}
+            </HlButton>
+          </div>
+        </div>
+      </div>
     </template>
 
     <!-- 绑定风险弹窗：每次绑定动作（手动/自动）都会弹出，标红同意勾选后
@@ -2212,10 +2336,110 @@ onUnmounted(stopLoginPolling)
         </HlButton>
       </template>
     </HlDialog>
+
+    <!-- 删除本地全部数据：红字勾选确认后放行；后端再做 confirm 逐字校验 -->
+    <HlDialog
+      v-model="wipeDialogOpen"
+      :title="t('settings.help.wipeTitle')"
+      :width="480"
+      :mask-closable="false"
+    >
+      <div class="risk-body">
+        <div class="risk-body__label">{{ t('settings.help.wipeBody') }}</div>
+        <ol class="risk-body__list">
+          <li v-for="it in WIPE_ITEMS" :key="it">
+            <span class="risk-body__rest">{{ t(it) }}</span>
+          </li>
+        </ol>
+        <HlCheckbox v-model="wipeConsent" class="risk-consent">
+          <span class="risk-consent__text">{{ t('settings.help.wipeConsent') }}</span>
+        </HlCheckbox>
+      </div>
+      <template #footer>
+        <HlButton variant="text" size="sm" @click="wipeDialogOpen = false">
+          {{ t('common.cancel') }}
+        </HlButton>
+        <HlButton
+          art="outline"
+          tone="red"
+          size="sm"
+          :disabled="!wipeConsent"
+          :loading="wiping"
+          @click="confirmWipe"
+        >
+          {{ t('settings.help.wipeConfirm') }}
+        </HlButton>
+      </template>
+    </HlDialog>
   </section>
 </template>
 
 <style scoped>
+/* ── 帮助与诊断卡 ── */
+.help-faq__item {
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.help-faq__item summary {
+  padding: 8px 0;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.help-faq__item p {
+  margin: 0 0 8px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.help-diag {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.help-diag__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.help-diag__label {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+}
+
+.help-diag__value {
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.help-diag__value--path {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 危险区：并入帮助卡但不与诊断行混排，虚线隔开 */
+.help-danger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.help-danger__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-color-danger);
+}
+
 /* ── 绑定风险弹窗正文 ── */
 .risk-body {
   display: flex;

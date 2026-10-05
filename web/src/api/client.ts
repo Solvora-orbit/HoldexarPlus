@@ -1909,6 +1909,9 @@ export const systemApi = {
     ),
   backupRemove: (name: string) =>
     request<{ removed: boolean }>('DELETE', `/system/backup/${encodeURIComponent(name)}`),
+  /** 删除本地全部数据：drop_all+create_all 重置 + VACUUM；confirm 必须逐字 DELETE */
+  wipeData: () =>
+    request<{ wiped: boolean }>('POST', '/system/wipe-data', { confirm: 'DELETE' }),
   // 密钥保护（凭据静态加密的密钥托管：机器绑定 / 系统凭据 / 口令）
   securityStatus: () => request<SecurityStatus>('GET', '/system/security'),
   /** 切换保护方式：后端全库换钥重加密（失败不改动库与密钥文件） */

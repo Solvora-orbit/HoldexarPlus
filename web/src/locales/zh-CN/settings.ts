@@ -32,6 +32,37 @@ const settings = {
   'settings.section.backup': '数据备份',
   'settings.section.update': '应用更新',
   'settings.section.tour': '新手教程',
+  'settings.section.help': '帮助与诊断',
+
+  /* ── 帮助与诊断卡片 ── */
+  'settings.help.desc': '常见问题速查与运行诊断。这里显示的数据目录即本次运行真正读写的库——排查「改过的设置像消失了一样」时先看它。',
+  'settings.help.faqDirectQ': '直连模式下点「STEAM 商店」打不开？',
+  'settings.help.faqDirectA':
+    '直连模式由浏览器直接访问 Steam 商店，国内网络直连大概率打不开——这是网络现象，不是应用故障。可在「网络」页切回「代理优先」，或让加速器 / 本地代理接管浏览器流量。',
+  'settings.help.faqNoExitQ': '抓取提示「代理池里暂时没有可用出口」？',
+  'settings.help.faqNoExitA':
+    '该任务需要代理池出口而池里没有启用节点。到「网络」页确认订阅与节点状态；不想用代理池，可在「网络」页把路由策略改为「直连」或「直连优先」——两者都托管到本机网络环境。',
+  'settings.help.faqDataDirQ': '改过的设置 / 数据「不见了」？',
+  'settings.help.faqDataDirA':
+    '不同启动方式可能使用不同数据目录（开发态 holdexar-dev 与打包态 holdexar 相互隔离）。先在下方确认「数据目录」与你上次启动时一致，再判断是不是换库了。',
+  'settings.help.version': '版本',
+  'settings.help.strategy': '当前路由策略',
+  'settings.help.dataDir': '数据目录',
+  'settings.help.copy': '复制',
+  'settings.help.copied': '已复制到剪贴板',
+  'settings.help.copyFailed': '复制失败，请手动选择复制',
+  'settings.help.openLogs': '打开日志页',
+  'settings.help.wipeLabel': '危险区',
+  'settings.help.wipeButton': '删除本地全部数据',
+  'settings.help.wipeTitle': '删除本地全部数据',
+  'settings.help.wipeBody': '即将删除以下全部本地数据（不可恢复）：',
+  'settings.help.wipeItem1': '游戏库与全部价格/历史数据',
+  'settings.help.wipeItem2': '愿望单、已购同步与监控池',
+  'settings.help.wipeItem3': '账号绑定与凭据（之后需重新绑定）',
+  'settings.help.wipeItem4': '提醒规则、通知与全部应用设置',
+  'settings.help.wipeConsent': '我已了解上述数据将被永久删除且无法恢复',
+  'settings.help.wipeConfirm': '全部删除',
+  'settings.help.wipeDone': '本地数据已全部删除，建议立即重启应用',
 
   /* ── Steam 账户绑定卡片 ── */
   'settings.steam.desc': '绑定后展示钱包余额（右上角）与账号结算币种/地区。Cookie 只保留登录态字段（含用于自动续期的 steamRefresh_steam），加密后只存本机数据库。',

@@ -28,7 +28,7 @@ from app.core.backup import (
     backup_dir,
 )
 from app.core.config import get_settings
-from app.core.database import WritePriority, get_session_factory, write_scheduler_diagnostics
+from app.core.database import Base, WritePriority, get_engine, get_session_factory, write_scheduler_diagnostics
 from app.core.database import write_gate
 from app.core.logging import ring_log_handler
 from app.domains.games.models import Game, GameCurrentPrice, GamePriceHistory
@@ -68,6 +68,31 @@ async def write_scheduler() -> dict:
     回答「是谁在堵、堵了多久」，不进用户面主流程。
     """
     return write_scheduler_diagnostics()
+
+
+class WipeData(BaseModel):
+    confirm: str  # 须逐字 "DELETE"：与前端红字勾选构成双保险
+
+
+@router.post("/system/wipe-data")
+async def wipe_data(req: WipeData) -> dict:
+    # 本地数据重置：业务表数据全部清除 + schema 重建到当前模型版本（元数据
+    # DDL 内部处理建表顺序与外键）。安全阀三层：confirm 逐字校验、爬取进行中
+    # 拒绝（409，清一半的账本会产出脏数据）、write_gate 下原子 DDL。
+    # 行级数据在本事务内原子清除；物理页回收交给日常备份/维护周期即可。
+    from app.crawler.occupancy import crawler_busy
+
+    if req.confirm != "DELETE":
+        raise HTTPException(status_code=400, detail="确认词不匹配，拒绝执行")
+    if crawler_busy():
+        raise HTTPException(status_code=409, detail="已有爬取任务在运行，请先停止再清空数据")
+
+    async with write_gate(WritePriority.INTERACTIVE, label="wipe-data"):
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+    return {"wiped": True}
 
 
 class LegacyImport(BaseModel):
