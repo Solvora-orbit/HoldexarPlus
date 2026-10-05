@@ -770,9 +770,13 @@ async def start_job(
 
     from app.domains.settings.service import get_value
 
-    if (await get_value("proxy.strategy", "proxy_first")) == "direct_only":
-        # 直连策略：价格作业**托管到用户本机网络环境**——加速器 / Clash Verge
-        # 等本地代理的通道即实际出口，池子状态与此形态无关（空池也能作业）。
+    if (await get_value("proxy.strategy", "proxy_first")) in ("direct_only", "direct_first"):
+        # 直连形态（direct_only 直连 / direct_first 直连优先）：价格作业**托管到
+        # 用户本机网络环境**——加速器 / Clash Verge 等本地代理的通道即实际出口，
+        # 池子状态与此形态无关（空池也能作业）。direct_first 的「失败换代理」通道
+        # 已随代理体系退役，策略引擎对它同样返回 None 直连（resolve_proxy_url），
+        # 因此必须与 direct_only 同走直连形态——否则直连优先用户会被错误地要求
+        # 代理池出口，空池即报「没有可用出口」（历史 bug：只判了 direct_only）。
         # 频率由 crawler 的全局滑动窗口闸（200 发/5 分钟）统一约束，多 worker
         # 只是在闸前排队，不提高请求速率，因此 worker 数收在小额。
         effective_workers = min(planned_workers, DIRECT_MODE_WORKERS)

@@ -335,6 +335,49 @@ async def test_direct_strategy_crawls_without_pool(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_direct_first_strategy_also_hosts_locally(db, monkeypatch):
+    """直连优先（direct_first）与直连同走本机托管形态：空池也不得报「没有可用出口」。
+
+    历史 bug：容量规划只判了 direct_only，直连优先被错误地送进代理池 lane 计划，
+    空池即 fail-closed 报「代理池里暂时没有可用出口」——而其「失败换代理」通道
+    早已退役（test_network_failover），策略引擎对它返回 None 直连
+    （resolve_proxy_url），语义上就是直连形态，必须与 direct_only 同分支。"""
+    import app.domains.proxypool.runtime as pp_runtime
+    import app.domains.settings.service as settings_service
+
+    _crawl_env(monkeypatch)
+
+    async def _direct_value(key, default=None):
+        if key == "proxy.strategy":
+            return "direct_first"
+        return default
+
+    monkeypatch.setattr(settings_service, "get_value", _direct_value)
+
+    async def _no_lane(_session, _d, **_kw):
+        raise AssertionError("直连形态不得询问池子 lane 计划")
+
+    monkeypatch.setattr(pp_runtime, "crawl_lane_plan", _no_lane)
+    monkeypatch.setattr(pp_runtime, "current_runtime_proxy_url", lambda _d=None: None)
+
+    captured: list = []
+
+    async def _capture_run_crawl(pairs, *, config, stop_event=None, pre_tasks=None, crawl_job_id=None):
+        captured.append(config)
+        return {"total": len(pairs or []) + len(pre_tasks or []), "processed": 0}
+
+    monkeypatch.setattr(crawl_service, "run_crawl", _capture_run_crawl)
+
+    await crawl_service.start_job(scope="appids", appids=[998002], kind="scheduled")
+    assert crawl_service._active is not None, "直连优先：空池也必须能启动"
+    await crawl_service._active.task
+    assert captured, "直连形态下 run_crawl 必须被调用"
+    cfg = captured[0]
+    assert cfg.proxy_url is None and not cfg.proxy_urls, "直连形态不带任何代理"
+    assert cfg.workers == crawl_service.DIRECT_MODE_WORKERS
+
+
+@pytest.mark.asyncio
 async def test_run_crawl_receives_job_identity(db, monkeypatch):
     """任务行身份随执行入口下传：作业台账凭 crawl_job_id 显式回指任务行。"""
     from sqlalchemy import select

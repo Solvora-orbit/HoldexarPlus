@@ -35,12 +35,13 @@ const proxies = {
   'proxies.strategy.directOnly.label': '直连',
   'proxies.strategy.directOnly.desc': '作业托管到本机网络环境（加速器 / Clash Verge 的通道即实际出口）<br><small>价格作业也走本机 · 限速 200 次/5 分钟</small>',
   'proxies.strategy.directFirst.label': '直连优先',
-  'proxies.strategy.directFirst.desc': '本机优先<br><small>失败时换代理重试</small>',
+  'proxies.strategy.directFirst.desc': '与「直连」同形态托管作业<br><small>旧版「失败换代理」通道已退役</small>',
   'proxies.strategy.proxyOnly.label': '完全走代理',
   'proxies.strategy.proxyOnly.desc': '所有请求经代理池<br><small>轮询发出</small>',
   'proxies.strategy.on': '启用',
   'proxies.strategy.off': '关闭',
   'proxies.strategy.updated': '路由策略已更新（下个任务生效）',
+  'proxies.strategy.loadFailed': '策略状态加载失败，为避免误显示默认值已隐藏卡片',
 
   /* 本地混合端口（纯配置，不随策略切换） */
   'proxies.port.label': '本地混合端口',

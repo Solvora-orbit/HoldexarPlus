@@ -36,6 +36,9 @@ const {
 const items = ref<ProxyItem[]>([])
 const subscriptions = ref<ProxySubscriptionItem[]>([])
 const strategy = ref<ProxyStrategy>({ strategy: 'proxy_first', clashPort: 7890 })
+/* 策略是否加载失败：失败时卡片网格必须让位给错误态——ref 初始默认值是
+   proxy_first，静默留在页面上就是「策略自己跳回代理优先」的假象来源。 */
+const strategyLoadFailed = ref(false)
 const events = ref<Awaited<ReturnType<typeof proxiesApi.events>>>([])
 const clash = ref<ClashStatus | null>(null)
 const loading = ref(true)
@@ -234,6 +237,7 @@ async function load() {
     const data = await proxiesApi.list()
     items.value = data.items
     strategy.value = data.strategy
+    strategyLoadFailed.value = false
     subscriptions.value = data.subscriptions
     events.value = await proxiesApi.events(80)
     clash.value = await proxiesApi.clashStatus()
@@ -246,6 +250,7 @@ async function load() {
         runningSubId.value ?? (known ? remembered! : clashSubs.value[clashSubs.value.length - 1]!.id)
     }
   } catch (e) {
+    strategyLoadFailed.value = true
     message.error(e instanceof Error ? e.message : String(e))
   } finally {
     loading.value = false
@@ -456,16 +461,17 @@ async function importPlainSubscription(sub: ProxySubscriptionItem) {
 
 // ─── 策略 / 节点池 ───
 
-function pickStrategy(card: StrategyCard) {
+async function pickStrategy(card: StrategyCard) {
+  const prev = strategy.value.strategy
   strategy.value.strategy = card.value
-  applyStrategy()
-}
-
-async function applyStrategy() {
   try {
-    await proxiesApi.setStrategy(strategy.value)
+    // 采纳服务端回显（PUT /proxies/strategy 返回 get_strategy() 全量）：界面永远
+    // 等于库里真值。旧实现保存失败仍保留本地新值，造成「界面直连、库里旧值」的
+    // 静默分叉，下次加载观感即「策略自己跳回」——这里失败必须回滚选中态。
+    strategy.value = await proxiesApi.setStrategy(strategy.value)
     message.success(t('proxies.strategy.updated'))
   } catch (e) {
+    strategy.value.strategy = prev
     message.error(e instanceof Error ? e.message : String(e))
   }
 }
@@ -769,7 +775,12 @@ function jobRunDuration(ms: number | null): string {
         </svg>
         <span>{{ t('proxies.section.routing') }}</span>
       </div>
-      <div class="proxyx-strategy-grid">
+      <!-- 加载失败必须显式呈现：让位错误态而不是静默显示 ref 默认值 proxy_first -->
+      <div v-if="strategyLoadFailed" class="proxyx-strategy-error">
+        <span>{{ t('proxies.strategy.loadFailed') }}</span>
+        <HlButton art="outline" tone="blue" size="sm" @click="load">{{ t('common.retry') }}</HlButton>
+      </div>
+      <div v-else class="proxyx-strategy-grid">
         <button
           v-for="card in strategyCards"
           :key="card.value"
@@ -1409,6 +1420,18 @@ function jobRunDuration(ms: number | null): string {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 10px;
+}
+
+/* 策略加载失败态：替代卡片网格，防止把 ref 默认值当库内真值展示 */
+.proxyx-strategy-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  color: var(--text-dim);
 }
 
 .proxyx-strategy-card {

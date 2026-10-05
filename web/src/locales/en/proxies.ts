@@ -27,12 +27,13 @@ const proxies: Partial<Record<MessageKey, string>> = {
   'proxies.strategy.directOnly.label': 'Direct only',
   'proxies.strategy.directOnly.desc': 'Jobs run on your local network (game booster / Clash Verge tunnel is the actual exit)<br><small>price jobs included · rate-capped at 200 req/5 min</small>',
   'proxies.strategy.directFirst.label': 'Direct first',
-  'proxies.strategy.directFirst.desc': 'Local first<br><small>retry through a proxy on failure</small>',
+  'proxies.strategy.directFirst.desc': 'Jobs hosted locally, same form as Direct only<br><small>the legacy proxy-failover path has been retired</small>',
   'proxies.strategy.proxyOnly.label': 'Proxy only',
   'proxies.strategy.proxyOnly.desc': 'Every request through the pool<br><small>rotated per request</small>',
   'proxies.strategy.on': 'On',
   'proxies.strategy.off': 'Off',
   'proxies.strategy.updated': 'Routing policy updated (takes effect on the next job)',
+  'proxies.strategy.loadFailed': 'Failed to load the routing policy; cards hidden to avoid showing a default as fact',
 
   /* Local mixed port (standalone config, unaffected by policy) */
   'proxies.port.label': 'Local mixed port',

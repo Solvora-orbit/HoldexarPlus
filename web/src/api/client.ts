@@ -52,6 +52,7 @@ const inflightGets = new Map<string, Promise<unknown>>()
  * 要么登记在这里，要么调用 request 时显式传 { noCache: true }。 */
 const NO_CACHE_PATHS = [
   '/account', // 顶栏每分钟轮转（在线状态/游戏中）
+  '/proxies', // 网络页配置态（路由策略/开关）：正确性优先于缓存，配置页非轮询场景
   '/proxies/stats', // 仪表盘 30s 轮询
   '/bills/sync', // 账单同步进行中的快照轮询
   '/crawl/active', // 任务状态（页内刷新）

@@ -6,7 +6,8 @@
 - direct_only   直连：作业托管到用户本机网络环境——加速器 / Clash Verge 等
                 本地代理的通道即实际出口；价格作业在此形态下也走本机，
                 频率由 crawler 全局限流闸（200 发/5 分钟）统一约束
-- direct_first  直连优先，失败换代理重试
+- direct_first  直连优先（语义等同直连形态：其「失败换代理」通道已随代理体系
+                退役，策略引擎对它同样返回 None 直连——见 test_network_failover）
 - proxy_only    从启用代理轮询取一个用于整个任务
 """
 from __future__ import annotations
@@ -167,9 +168,18 @@ async def get_strategy() -> dict:
         # 直连是显式选择（用户本机有加速器 / Clash Verge 等托管通道时选它）
         strategy = "proxy_first"
         await set_value("proxy.strategy", strategy)
+        # 审计：正常新装也会走这里，但「库里值凭空消失」唯一可能来自数据目录
+        # 漂移/换库——留痕（含数据目录）供「策略自己跳回默认」类问题排查。
+        from app.core.config import get_settings
+
+        logger.warning(
+            "[策略] proxy.strategy 缺失，已写默认 %s | 数据目录 %s",
+            strategy, get_settings().data_dir,
+        )
     if strategy in ("pinned", "clash"):
         # 策略下架：pinned/clash 移除（自启 Verge 由代理优先回落探测
         # 覆盖），存量值一次性迁移，避免静默退化为 proxy_only 语义（无代理即报错）。
+        logger.warning("[策略] 旧策略 %s 已下架，一次性迁移为 proxy_first", strategy)
         strategy = "proxy_first"
         await set_value("proxy.strategy", strategy)
         from app.domains.settings.service import delete_value
@@ -191,12 +201,17 @@ async def set_strategy(
     autostart: bool | None = None,
     health_auto: bool | None = None,
 ) -> None:
-    from app.domains.settings.service import set_value
+    from app.domains.settings.service import get_value, set_value
 
     if strategy is not None:
         if strategy not in STRATEGIES:
             raise ValueError(f"未知策略: {strategy}")
+        old = await get_value("proxy.strategy", None)
         await set_value("proxy.strategy", strategy)
+        # 审计：策略没有「自动改写」路径，唯一非 UI 写入是上面的兜底/迁移；
+        # 留痕每次真实变更，出问题按日志即可闭环定位。
+        if old != strategy:
+            logger.info("[策略] 变更 %s -> %s", old or "<缺省>", strategy)
     if clash_port is not None:
         await set_value("proxy.clash_port", clash_port)
     if autostart is not None:
