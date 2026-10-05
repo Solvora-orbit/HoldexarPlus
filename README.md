@@ -6,7 +6,7 @@
 
 **本地 Steam 多区价格监控终端**
 
-[![Version](https://img.shields.io/badge/version-v0.1.1--plus.1-orange)](../../releases)
+[![Version](https://img.shields.io/badge/version-v0.1.1--plus.2-orange)](../../releases)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13%2B-blue?logo=python&logoColor=white)](https://www.python.org)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Vue 3](https://img.shields.io/badge/Frontend-Vue%203-42b883?logo=vuedotjs&logoColor=white)](https://vuejs.org)
