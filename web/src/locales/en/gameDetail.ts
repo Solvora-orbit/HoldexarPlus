@@ -16,7 +16,7 @@ const gameDetail: Partial<Record<MessageKey, string>> = {
   'gameDetail.section.bundles': 'Linked bundles',
 
   /* Gradient header */
-  'gameDetail.header.back': 'Back to Find Games',
+  'gameDetail.header.back': 'Back',
   'gameDetail.header.developers': 'Developer: {names}',
   'gameDetail.header.publishers': 'Publisher: {names}',
   'gameDetail.region.cn': 'CN',

@@ -53,6 +53,16 @@ interface RegionRow {
 
 const route = useRoute()
 const router = useRouter()
+/* 来源感知返回：有站内历史就 back（游戏库/找游戏/我的关注进来都原路回去），
+   直达链接（无历史）兜底回游戏库——旧实现写死 push('/library')，从游戏库
+   进来会被甩到找游戏页。 */
+function goBack() {
+  if (window.history.state?.back != null) {
+    router.back()
+  } else {
+    void router.push('/gamelib')
+  }
+}
 const regionsStore = useRegionsStore()
 const localeStore = useLocaleStore()
 // 千分位与时间随界面语言（fmt 内部现读 locale，切语言即重渲染，见 locales/format.ts）
@@ -510,8 +520,8 @@ onMounted(load)
     </div>
 
     <template v-else-if="detail">
-      <!-- 返回键 -->
-      <button class="gd-back-btn" @click="router.push('/library')">
+      <!-- 返回键：来源感知（见 goBack），无历史兜底回游戏库 -->
+      <button class="gd-back-btn" @click="goBack">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M19 12H5M12 19l-7-7 7-7" />
         </svg>

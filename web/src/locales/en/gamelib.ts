@@ -48,6 +48,9 @@ const gamelib = {
   /* ── Pagination ── */
   'gamelib.pager.range': '{from}–{to} of {n} games',
   'gamelib.pager.refresh': 'Refresh owned games',
+  'gamelib.pager.recrawl': 'Refetch unpriced ({n})',
+  'gamelib.pager.recrawlNone': 'No unpriced games in the current view',
+  'gamelib.pager.recrawlStarted': 'Refetch job started ({n} games) — the list refreshes automatically when done',
 
   /* ── Game card (components/business/LibGameCard.vue) ── */
   'gamelib.card.free': 'Free',

@@ -4,15 +4,18 @@
    覆盖绑定账号 / 手动添加账户 / 家庭组成员）。 */
 import { computed, onMounted, ref, watch } from 'vue'
 
+import { crawlApi } from '@/api/client'
 import { useOwnedLibStore } from '@/stores/ownedLib'
 import { useI18n, useLocaleFormat } from '@/locales'
 import HlButton from '@/components/ui/HlButton.vue'
+import HlIcon from '@/components/ui/HlIcon.vue'
 import HlChip from '@/components/ui/HlChip.vue'
 import HlEmpty from '@/components/ui/HlEmpty.vue'
 import HlPagination from '@/components/ui/HlPagination.vue'
 import HlStat from '@/components/ui/HlStat.vue'
 import LibGameCard from '@/components/business/LibGameCard.vue'
 import { PALETTE } from '@/lib/familyColors'
+import { message } from '@/components/ui'
 
 const { t } = useI18n()
 const fmt = useLocaleFormat()
@@ -42,6 +45,28 @@ const scopeGames = computed(() => {
   if (!selected.value) return store.games
   return store.games.filter((g) => g.owners.some((o) => o.steamid === selected.value))
 })
+
+/* 无价格游戏补抓：cnPriceFen 为 null = 该游戏还没有国区价格（首爬未跑或失败）。
+   定向 appids 重抓走既有 manual 通道；任务进行中后端 409，捕获后提示。
+   完成后的列表刷新由 gamelib/Index.vue 的 dataEpoch watch 接管。 */
+const recrawling = ref(false)
+const unpricedCount = computed(
+  () => scopeGames.value.filter((g) => g.cnPriceFen == null).length,
+)
+
+async function recrawlUnpriced() {
+  const appids = scopeGames.value.filter((g) => g.cnPriceFen == null).map((g) => g.appid)
+  if (recrawling.value || !appids.length) return
+  recrawling.value = true
+  try {
+    await crawlApi.run('appids', appids)
+    message.success(t('gamelib.pager.recrawlStarted', { n: appids.length }))
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    recrawling.value = false
+  }
+}
 
 const filtered = computed(() => {
   let list = [...scopeGames.value]
@@ -247,6 +272,17 @@ watch([selected, search, onlyShared, activeSort], () => {
       </div>
 
       <div class="gl-foot">
+        <HlButton
+          size="sm"
+          variant="text"
+          :disabled="store.loading || recrawling || !unpricedCount"
+          :loading="recrawling"
+          :title="unpricedCount ? '' : t('gamelib.pager.recrawlNone')"
+          @click="recrawlUnpriced"
+        >
+          <HlIcon name="refresh" />
+          {{ t('gamelib.pager.recrawl', { n: unpricedCount }) }}
+        </HlButton>
         <HlButton size="sm" variant="text" :disabled="store.loading" :loading="store.loading" @click="store.load(true)">
           ⟳ {{ t('gamelib.pager.refresh') }}
         </HlButton>

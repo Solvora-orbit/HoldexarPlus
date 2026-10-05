@@ -47,6 +47,9 @@ const gamelib = {
   /* ── 分页 ── */
   'gamelib.pager.range': '第 {from}–{to} 款 · 共 {n} 款',
   'gamelib.pager.refresh': '刷新已购数据',
+  'gamelib.pager.recrawl': '补抓无价格游戏（{n}）',
+  'gamelib.pager.recrawlNone': '当前列表内没有缺少价格的游戏',
+  'gamelib.pager.recrawlStarted': '补抓任务已启动（{n} 款），完成后列表自动刷新',
 
   /* ── 游戏卡片（components/business/LibGameCard.vue）── */
   'gamelib.card.free': '免费',

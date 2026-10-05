@@ -5,10 +5,12 @@
    - 家庭库 → familyLib store（GET /family/library），自 family 页迁入，
      页签激活时由 FamilyLib 自行拉取（familyLib store 的 ready 守卫复用缓存）；
    - 游玩动态（GlPlay）同数据源，自 family 页迁入（词条 famPlay.* 随迁）。 */
-import { computed, onMounted, ref, type Component } from 'vue'
+import { computed, onMounted, ref, watch, type Component } from 'vue'
 
+import { invalidateGetCache } from '@/api/client'
 import { useI18n, type MessageKey } from '@/locales'
 import { HlPaneSwitch, HlTabs, type HlTabItem } from '@/components/ui'
+import { useCrawlStatusStore } from '@/stores/crawlStatus'
 import { useOwnedLibStore } from '@/stores/ownedLib'
 import GlOwned from './tabs/GlOwned.vue'
 import GlInsights from './tabs/GlInsights.vue'
@@ -17,9 +19,21 @@ import GlPlay from './tabs/GlPlay.vue'
 
 const { t } = useI18n()
 const ownedStore = useOwnedLibStore()
+const crawl = useCrawlStatusStore()
 onMounted(() => {
   void ownedStore.load()
 })
+
+/* 爬取任务收敛（dataEpoch 在任务终态 +1）→ 强制重拉已购矩阵：首次爬取会把
+   cnPriceFen 从 null 变有值，不刷新就是「重进才有数据」。invalidate 先清
+   GET 时间窗缓存，否则 60s 内拿到的还是旧响应。 */
+watch(
+  () => crawl.dataEpoch,
+  () => {
+    invalidateGetCache('/owned-library')
+    void ownedStore.load(true)
+  },
+)
 
 const activeTab = ref('owned')
 
