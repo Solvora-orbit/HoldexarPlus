@@ -18,7 +18,15 @@ const settings: Partial<Record<MessageKey, string>> = {
   'settings.section.backup': 'Backups',
   'settings.section.update': 'App updates',
   'settings.section.tour': 'Guided tour',
+  'settings.section.appearance': 'Appearance',
   'settings.section.help': 'Help & diagnostics',
+
+  /* Appearance card (accent schemes) */
+  'settings.appearance.desc': 'The accent color applies to buttons, links, charts and highlights. Dark / light toggle lives in the top bar.',
+  'settings.appearance.steam': 'Steam blue (default)',
+  'settings.appearance.emerald': 'Emerald',
+  'settings.appearance.amber': 'Amber',
+  'settings.appearance.violet': 'Violet',
 
   /* Help & diagnostics card */
   'settings.help.desc': 'Quick answers and runtime diagnostics. The data directory shown here is the store this run actually reads and writes — check it first when changed settings seem to have vanished.',

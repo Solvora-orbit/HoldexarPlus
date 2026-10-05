@@ -24,6 +24,7 @@ import { useI18n, type MessageKey } from '@/locales'
 import { useAccountStore } from '@/stores/account'
 import { useRegionsStore } from '@/stores/regions'
 import { useSettingsStore } from '@/stores/settings'
+import { useThemeStore, type AccentScheme } from '@/stores/theme'
 import { useTourStore } from '@/stores/tour'
 import { useUpdaterStore } from '@/stores/updater'
 import { friendCodeOf } from '@/utils/steamId'
@@ -42,6 +43,18 @@ const errorMsg = ref('')
 
 /* 更新检查结果与侧栏红点共用一份（App.vue 启动时也会查一次） */
 const updaterStore = useUpdaterStore()
+
+/* ── 外观（主题色方案）──
+   深浅切换在顶栏（HlThemeToggle）；这里切强调色：写 html[data-accent]，
+   tokens.css 尾部的方案覆盖块接手 --accent 系令牌。图表色经 chartTheme.ts
+   运行时读 token，自动跟随，无需单独处理。 */
+const themeStore = useThemeStore()
+const ACCENTS: { id: AccentScheme; labelKey: MessageKey }[] = [
+  { id: 'steam', labelKey: 'settings.appearance.steam' },
+  { id: 'emerald', labelKey: 'settings.appearance.emerald' },
+  { id: 'amber', labelKey: 'settings.appearance.amber' },
+  { id: 'violet', labelKey: 'settings.appearance.violet' },
+]
 
 /* 产品导览手动重开（首次启动已自动弹过）：开的是 App.vue 里那个全局实例，
    本页不自己挂浮层——页面实例会被导览第一步的 router.push 卸载 */
@@ -2253,6 +2266,25 @@ onUnmounted(stopLoginPolling)
         <HlButton size="sm" @click="openToolbox">{{ t('settings.toolbox.open') }}</HlButton>
       </div>
 
+      <!-- 外观：强调色方案。深浅在顶栏切；这里写 html[data-accent]，
+           tokens.css 尾部对应覆盖块接手 --accent 系令牌，图表自动跟随 -->
+      <div class="card settings-card" data-section="settings.section.appearance">
+        <div class="section-title">{{ t('settings.section.appearance') }}</div>
+        <div class="section-desc">{{ t('settings.appearance.desc') }}</div>
+        <div class="appearance-schemes">
+          <button
+            v-for="s in ACCENTS"
+            :key="s.id"
+            class="appearance-scheme"
+            :class="{ active: themeStore.accent === s.id }"
+            @click="themeStore.setAccent(s.id)"
+          >
+            <span class="appearance-scheme__dot" :style="{ background: `var(--scheme-dot-${s.id})` }" />
+            <span>{{ t(s.labelKey) }}</span>
+          </button>
+        </div>
+      </div>
+
       <!-- 帮助与诊断：常见问题速查 + 快捷诊断。数据目录可视化是「改了 A 库
            看 B 库」类问题（如路由策略看起来自己跳回）的一线诊断入口——
            这里显示的路径即本次运行真正读写的库所在 -->
@@ -2438,6 +2470,38 @@ onUnmounted(stopLoginPolling)
   font-size: 13px;
   font-weight: 600;
   color: var(--el-color-danger);
+}
+
+/* ── 外观：主题色方案 ── */
+.appearance-schemes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.appearance-scheme {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-soft);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.appearance-scheme.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-a30);
+}
+
+.appearance-scheme__dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex: 0 0 auto;
 }
 
 /* ── 绑定风险弹窗正文 ── */

@@ -1870,3 +1870,143 @@ html:not(.dark) .el-table th.el-table__cell {
   backdrop-filter: blur(8px);
   border: 1px solid var(--border-soft);
 }
+
+/* ═══ 主题色方案（HoldexarPlus 增补）═══
+   data-accent 由 theme store 写到 <html>；'steam' 为默认——无覆盖块即上面
+   的原值。覆盖块必须成对：浅色 html[data-accent=…]:not(.dark)、深色
+   html.dark[data-accent=…]（比单条件选择器高一级，顺序无关命中正确）。
+   每套覆盖的令牌名与上方 --accent 系一一对应，缺一项即两模式漂移。 */
+
+/* ── 翠绿 emerald ── */
+html[data-accent='emerald']:not(.dark) {
+  --accent: #0e7a4e;
+  --accent-deep: #0b6340;
+  --accent-soft: rgba(14, 122, 78, 0.1);
+  --accent-hover: #0b6340;
+  --accent-a08: rgba(14, 122, 78, 0.08);
+  --accent-a10: rgba(14, 122, 78, 0.1);
+  --accent-a15: rgba(14, 122, 78, 0.14);
+  --accent-a20: rgba(14, 122, 78, 0.18);
+  --accent-a25: rgba(14, 122, 78, 0.22);
+  --accent-a30: rgba(14, 122, 78, 0.28);
+  --accent-a40: rgba(14, 122, 78, 0.38);
+  --accent-a50: rgba(14, 122, 78, 0.48);
+  --accent-a60: rgba(14, 122, 78, 0.58);
+  --accent-a90: rgba(14, 122, 78, 0.88);
+  --accent-fill: #6cb98f;
+  --accent-fill-hover: #55a87a;
+  --on-accent-fill: #0f2418;
+  --on-accent: #ffffff;
+}
+html.dark[data-accent='emerald'] {
+  --accent: #5fd39a;
+  --accent-deep: #48b184;
+  --accent-soft: rgba(95, 211, 154, 0.12);
+  --accent-hover: #7fdfae;
+  --accent-a08: rgba(95, 211, 154, 0.08);
+  --accent-a10: rgba(95, 211, 154, 0.1);
+  --accent-a15: rgba(95, 211, 154, 0.15);
+  --accent-a20: rgba(95, 211, 154, 0.2);
+  --accent-a25: rgba(95, 211, 154, 0.25);
+  --accent-a30: rgba(95, 211, 154, 0.3);
+  --accent-a40: rgba(95, 211, 154, 0.4);
+  --accent-a50: rgba(95, 211, 154, 0.5);
+  --accent-a60: rgba(95, 211, 154, 0.6);
+  --accent-a90: rgba(95, 211, 154, 0.9);
+  --accent-fill: #5fd39a;
+  --accent-fill-hover: #7fdfae;
+  --on-accent-fill: #0f2418;
+  --on-accent: #10202e;
+}
+
+/* ── 暖橙 amber ── */
+html[data-accent='amber']:not(.dark) {
+  --accent: #c46a00;
+  --accent-deep: #a35700;
+  --accent-soft: rgba(196, 106, 0, 0.1);
+  --accent-hover: #a35700;
+  --accent-a08: rgba(196, 106, 0, 0.08);
+  --accent-a10: rgba(196, 106, 0, 0.1);
+  --accent-a15: rgba(196, 106, 0, 0.14);
+  --accent-a20: rgba(196, 106, 0, 0.18);
+  --accent-a25: rgba(196, 106, 0, 0.22);
+  --accent-a30: rgba(196, 106, 0, 0.28);
+  --accent-a40: rgba(196, 106, 0, 0.38);
+  --accent-a50: rgba(196, 106, 0, 0.48);
+  --accent-a60: rgba(196, 106, 0, 0.58);
+  --accent-a90: rgba(196, 106, 0, 0.88);
+  --accent-fill: #e8a95e;
+  --accent-fill-hover: #d99746;
+  --on-accent-fill: #2d1a05;
+  --on-accent: #ffffff;
+}
+html.dark[data-accent='amber'] {
+  --accent: #f0a04b;
+  --accent-deep: #d98a35;
+  --accent-soft: rgba(240, 160, 75, 0.12);
+  --accent-hover: #f7b76e;
+  --accent-a08: rgba(240, 160, 75, 0.08);
+  --accent-a10: rgba(240, 160, 75, 0.1);
+  --accent-a15: rgba(240, 160, 75, 0.15);
+  --accent-a20: rgba(240, 160, 75, 0.2);
+  --accent-a25: rgba(240, 160, 75, 0.25);
+  --accent-a30: rgba(240, 160, 75, 0.3);
+  --accent-a40: rgba(240, 160, 75, 0.4);
+  --accent-a50: rgba(240, 160, 75, 0.5);
+  --accent-a60: rgba(240, 160, 75, 0.6);
+  --accent-a90: rgba(240, 160, 75, 0.9);
+  --accent-fill: #f0a04b;
+  --accent-fill-hover: #f7b76e;
+  --on-accent-fill: #2d1a05;
+  --on-accent: #2d1a05;
+}
+
+/* ── 紫罗兰 violet ── */
+html[data-accent='violet']:not(.dark) {
+  --accent: #7a4fd0;
+  --accent-deep: #6540b5;
+  --accent-soft: rgba(122, 79, 208, 0.1);
+  --accent-hover: #6540b5;
+  --accent-a08: rgba(122, 79, 208, 0.08);
+  --accent-a10: rgba(122, 79, 208, 0.1);
+  --accent-a15: rgba(122, 79, 208, 0.14);
+  --accent-a20: rgba(122, 79, 208, 0.18);
+  --accent-a25: rgba(122, 79, 208, 0.22);
+  --accent-a30: rgba(122, 79, 208, 0.28);
+  --accent-a40: rgba(122, 79, 208, 0.38);
+  --accent-a50: rgba(122, 79, 208, 0.48);
+  --accent-a60: rgba(122, 79, 208, 0.58);
+  --accent-a90: rgba(122, 79, 208, 0.88);
+  --accent-fill: #b49ae8;
+  --accent-fill-hover: #a286de;
+  --on-accent-fill: #1d1230;
+  --on-accent: #ffffff;
+}
+html.dark[data-accent='violet'] {
+  --accent: #b39af0;
+  --accent-deep: #9d82e0;
+  --accent-soft: rgba(179, 154, 240, 0.12);
+  --accent-hover: #c7b4f6;
+  --accent-a08: rgba(179, 154, 240, 0.08);
+  --accent-a10: rgba(179, 154, 240, 0.1);
+  --accent-a15: rgba(179, 154, 240, 0.15);
+  --accent-a20: rgba(179, 154, 240, 0.2);
+  --accent-a25: rgba(179, 154, 240, 0.25);
+  --accent-a30: rgba(179, 154, 240, 0.3);
+  --accent-a40: rgba(179, 154, 240, 0.4);
+  --accent-a50: rgba(179, 154, 240, 0.5);
+  --accent-a60: rgba(179, 154, 240, 0.6);
+  --accent-a90: rgba(179, 154, 240, 0.9);
+  --accent-fill: #b39af0;
+  --accent-fill-hover: #c7b4f6;
+  --on-accent-fill: #1d1230;
+  --on-accent: #1d1230;
+}
+
+/* ── 方案预览色点（设置页外观卡；主题无关的定色，浅深同值）── */
+:root {
+  --scheme-dot-steam: #66c0f4;
+  --scheme-dot-emerald: #52c47e;
+  --scheme-dot-amber: #f0a04b;
+  --scheme-dot-violet: #b39af0;
+}

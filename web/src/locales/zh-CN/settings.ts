@@ -32,7 +32,15 @@ const settings = {
   'settings.section.backup': '数据备份',
   'settings.section.update': '应用更新',
   'settings.section.tour': '新手教程',
+  'settings.section.appearance': '外观',
   'settings.section.help': '帮助与诊断',
+
+  /* ── 外观（主题色方案）── */
+  'settings.appearance.desc': '强调色会应用到按钮、链接、图表与高亮。深色 / 浅色切换在顶栏的圆形按钮。',
+  'settings.appearance.steam': '蒸汽蓝（默认）',
+  'settings.appearance.emerald': '翠绿',
+  'settings.appearance.amber': '暖橙',
+  'settings.appearance.violet': '紫罗兰',
 
   /* ── 帮助与诊断卡片 ── */
   'settings.help.desc': '常见问题速查与运行诊断。这里显示的数据目录即本次运行真正读写的库——排查「改过的设置像消失了一样」时先看它。',

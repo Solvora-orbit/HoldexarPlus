@@ -3,13 +3,21 @@ import { ref, watch } from 'vue'
 import { APP_SLUG } from '@/appInfo'
 
 export type ThemeMode = 'dark' | 'light'
+/** 强调色方案：steam 默认（tokens.css 原值）；其余对应 tokens.css 尾部的
+ *  html[data-accent=…] / html.dark[data-accent=…] 覆盖块，新增方案两处同步。 */
+export type AccentScheme = 'steam' | 'emerald' | 'amber' | 'violet'
 
 const STORAGE_KEY = `${APP_SLUG}.theme`
+const ACCENT_KEY = `${APP_SLUG}.accent`
 
-/** 主题状态：切换 html.dark + localStorage 持久化 + logo 联动。 */
+/** 主题状态：切换 html.dark + localStorage 持久化 + logo 联动；
+ *  强调色方案：写 html[data-accent] 切换 tokens.css 的强调色令牌组。 */
 export const useThemeStore = defineStore('theme', () => {
   const theme = ref<ThemeMode>(
     (localStorage.getItem(STORAGE_KEY) as ThemeMode) || 'dark',
+  )
+  const accent = ref<AccentScheme>(
+    (localStorage.getItem(ACCENT_KEY) as AccentScheme) || 'steam',
   )
 
   const isDark = ref(theme.value === 'dark')
@@ -29,6 +37,21 @@ export const useThemeStore = defineStore('theme', () => {
     }).catch(() => {})
   }
 
+  function applyAccent() {
+    // steam 是默认方案：移除属性让 tokens.css 原值生效，不留空属性节点
+    if (accent.value === 'steam') {
+      document.documentElement.removeAttribute('data-accent')
+    } else {
+      document.documentElement.dataset.accent = accent.value
+    }
+    localStorage.setItem(ACCENT_KEY, accent.value)
+  }
+
+  function setAccent(s: AccentScheme) {
+    accent.value = s
+    applyAccent()
+  }
+
   function toggle() {
     isDark.value = !isDark.value
     theme.value = isDark.value ? 'dark' : 'light'
@@ -37,6 +60,7 @@ export const useThemeStore = defineStore('theme', () => {
 
   // 初始化即应用（main.ts 挂载前也会调一次，双保险）
   apply()
+  applyAccent()
 
-  return { theme, isDark, toggle, apply }
+  return { theme, isDark, accent, toggle, apply, setAccent }
 })
