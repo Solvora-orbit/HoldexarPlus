@@ -49,9 +49,11 @@ app.use(ElementPlus)
 app.use(hlUi)
 setupForceReload()
 
-// 主题：读取 localStorage 持久化偏好（默认深色），挂载前应用
+// 主题：读取 localStorage 持久化偏好（默认深色），挂载前应用。
+// apply(false)：初始化只应用不回写服务端镜像——镜像只在用户切换时更新，
+// 否则启动时会把默认值反向写进 app_settings（污染原生弹窗配色源）。
 const themeStore = useThemeStore(pinia)
-themeStore.apply()
+themeStore.apply(false)
 // 界面语言：同款挂载前应用（html.lang + localStorage，词典见 @/locales）
 const localeStore = useLocaleStore(pinia)
 localeStore.apply()

@@ -22,10 +22,14 @@ export const useThemeStore = defineStore('theme', () => {
 
   const isDark = ref(theme.value === 'dark')
 
-  function apply() {
+  /** mirror=false：只应用不回写。初始化链路（store 创建 + main.ts 挂载前）
+   *  必须传 false——否则启动时会把「localStorage 丢失后的默认值」反向 PUT
+   *  进服务端镜像，污染桌面壳原生弹窗的配色来源。 */
+  function apply(mirror = true) {
     document.documentElement.classList.toggle('dark', isDark.value)
     document.documentElement.style.colorScheme = isDark.value ? 'dark' : 'light'
     localStorage.setItem(STORAGE_KEY, isDark.value ? 'dark' : 'light')
+    if (!mirror) return
     // 主题镜像到本地库（app_settings.ui.theme）：关闭弹窗是独立 WinForms
     // 窗，读不到 localStorage，靠这份镜像跟随主题（初始化 + 每次切换都会
     // 走到这里，镜像始终新鲜）。fire-and-forget：失败静默——镜像缺位只
@@ -58,8 +62,8 @@ export const useThemeStore = defineStore('theme', () => {
     apply()
   }
 
-  // 初始化即应用（main.ts 挂载前也会调一次，双保险）
-  apply()
+  // 初始化即应用（main.ts 挂载前也会调一次，双保险）：不回写服务端镜像
+  apply(false)
   applyAccent()
 
   return { theme, isDark, accent, toggle, apply, setAccent }

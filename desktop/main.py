@@ -1707,6 +1707,14 @@ def _open_window(app_url: str) -> None:
             # pywebview 5.x：icon 是 start() 的参数（create_window 无此参，
             # 传了会 TypeError 顶层炸穿兜底）
             start_kwargs["icon"] = icon
+        # 关闭默认无痕模式并指定持久化存储：pywebview 5.x private_mode 默认
+        # True，WebView2 用户数据目录落临时目录且关窗即删——localStorage
+        # 每次启动清空，主题/语言/强调色等全部偏好「下次进来恢复默认」。
+        # storage_path 与后端数据目录同源（按 dev/打包态自然隔离），历史
+        # 数据不迁移；同一目录要求启动参数一致（_apply_webview2_static_args
+        # 的环境参数每次启动相同，满足）。
+        start_kwargs["private_mode"] = False
+        start_kwargs["storage_path"] = str(_data_dir() / "webview")
         # 托盘与 health 跳转都在窗口建好后由 start(func) 拉起（时序见 _run_tray）
         webview.start(_on_window_ready, (window, app_url), **start_kwargs)  # 阻塞至窗口真关闭（仅托盘退出可达）
     except Exception as e:  # noqa: BLE001 —— 窗口创建/渲染层初始化失败一并降级浏览器
