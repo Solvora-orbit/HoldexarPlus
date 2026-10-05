@@ -27,7 +27,7 @@ const settingsStore = useSettingsStore()
 const jobs = ref<CrawlJob[]>([])
 const loading = ref(false)
 const manualAppids = ref('')
-const scope = ref<'all' | 'appids' | 'wishlist'>('all')
+const scope = ref<'all' | 'appids' | 'wishlist' | 'discounted' | 'owned' | 'pool'>('all')
 
 /** 区服列表（服务端下发，含 enabled 状态）；null = 全部启用。
     作用：已购游戏抓取地区的全选/清空备选集与「跟随监控地区」计数
@@ -395,6 +395,24 @@ async function repairNow() {
   }
 }
 
+/** 立即抓取特惠榜：scope=specials 只爬榜单差集（库外新面孔，爬取落库即完成
+    目录发现），kind=specials_backfill 与自动价格轮尾段同通道同语义；
+    遇上库内已在抓的对象会自动去重，重复点击最多多跑一轮空榜 */
+async function startSpecials() {
+  if (starting.value) return
+  starting.value = true
+  try {
+    const res = await crawlApi.run('specials', undefined, 'specials_backfill')
+    message.success(t('crawl.start.specialsStarted', { id: res.id, count: res.count }))
+    crawl.running = true
+    await loadJobs()
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    starting.value = false
+  }
+}
+
 const statusLabel = (status: string) =>
   (
     {
@@ -583,6 +601,9 @@ onBeforeUnmount(() => {
         <el-radio-group v-model="scope">
           <el-radio-button value="all">{{ t('crawl.start.scopeAll') }}</el-radio-button>
           <el-radio-button value="wishlist">{{ t('crawl.start.scopeWishlist') }}</el-radio-button>
+          <el-radio-button value="discounted">{{ t('crawl.start.scopeDiscounted') }}</el-radio-button>
+          <el-radio-button value="owned">{{ t('crawl.start.scopeOwned') }}</el-radio-button>
+          <el-radio-button value="pool">{{ t('crawl.start.scopePool') }}</el-radio-button>
           <el-radio-button value="appids">{{ t('crawl.start.scopeAppids') }}</el-radio-button>
         </el-radio-group>
         <el-input
@@ -618,6 +639,15 @@ onBeforeUnmount(() => {
         >
           <HlIcon name="download" />
           {{ t('crawl.start.repair') }}
+        </HlButton>
+        <HlButton
+          art="outline"
+          size="sm"
+          :disabled="crawl.running || starting"
+          :title="t('crawl.start.specialsTip')"
+          @click="startSpecials"
+        >
+          {{ t('crawl.start.specials') }}
         </HlButton>
         <HlButton variant="default" :title="t('crawl.jobs.refresh')" @click="loadJobs">
           <HlIcon name="refresh" />

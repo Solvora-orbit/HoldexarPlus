@@ -31,6 +31,9 @@ const crawl: Partial<Record<MessageKey, string>> = {
     '"All games" shares the same queue as automatic price updates: wishlist and followed first, then every non-delisted game in the library, then new faces from the Steam specials chart. Regions come from your Me page settings. First-time imports skip the sale pre-check; turn it on for refreshes to save requests.',
   'crawl.start.scopeAll': 'All games',
   'crawl.start.scopeWishlist': 'Wishlist and followed',
+  'crawl.start.scopeDiscounted': 'On discount',
+  'crawl.start.scopeOwned': 'Owned library',
+  'crawl.start.scopePool': 'Watch pool',
   'crawl.start.scopeAppids': 'Specific AppIDs',
   'crawl.start.appidsPlaceholder': 'e.g. 620,105600',
   'crawl.start.button': 'Start task',
@@ -42,6 +45,10 @@ const crawl: Partial<Record<MessageKey, string>> = {
   'crawl.start.repairTip':
     "Skip the automatic retry cycle and re-fetch the regions that failed in recent updates right away; batches that fail again stay in the ledger for the next automatic round",
   'crawl.start.repairStarted': 'Retry job #{id} started ({count} region batches)',
+  'crawl.start.specials': 'Fetch specials board',
+  'crawl.start.specialsTip':
+    'Pull the Steam specials + popular board and crawl only new titles not yet in the library (they enter the catalog on first crawl); the automatic price cycle also runs this as its tail segment',
+  'crawl.start.specialsStarted': 'Specials crawl started ({count} new titles)',
   'crawl.stop.button': 'Stop',
   'crawl.stop.requested': 'Stop requested',
   'crawl.stop.none': 'No job is running',

@@ -41,6 +41,9 @@ const crawl = {
     '「全部游戏」与自动价格更新同一条队列：先关注与愿望单，再游戏库全部未下架游戏，最后 Steam 特惠榜新面孔。区服来自「设置」页配置；新游戏首次入库不走打折预检，刷新场景可用预检省请求。',
   'crawl.start.scopeAll': '全部游戏',
   'crawl.start.scopeWishlist': '愿望单与已关注',
+  'crawl.start.scopeDiscounted': '折扣中游戏',
+  'crawl.start.scopeOwned': '已购游戏库',
+  'crawl.start.scopePool': '监控池',
   'crawl.start.scopeAppids': '指定 AppID',
   'crawl.start.appidsPlaceholder': '例如 620,105600',
   'crawl.start.button': '启动任务',
@@ -52,6 +55,10 @@ const crawl = {
   'crawl.start.repairTip':
     '不等自动补抓周期，立即按区批量重抓最近更新中失败的价格；本轮补抓仍失败的批次照常记账，留待下一轮自动恢复',
   'crawl.start.repairStarted': '补抓任务 #{id} 已启动（{count} 个地区批次）',
+  'crawl.start.specials': '抓取特惠榜',
+  'crawl.start.specialsTip':
+    '拉取 Steam 特惠+热门榜，只抓库外新面孔（爬取落库即完成目录发现）；自动价格轮的尾段也会定时执行同一动作',
+  'crawl.start.specialsStarted': '特惠榜抓取已启动（{count} 款新面孔）',
   'crawl.stop.button': '停止',
   'crawl.stop.requested': '已请求停止',
   'crawl.stop.none': '没有运行中的任务',

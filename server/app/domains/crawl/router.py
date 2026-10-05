@@ -20,7 +20,8 @@ router = APIRouter(tags=["crawl"])
 class CrawlRunRequest(BaseModel):
     scope: str = "appids"
     # all（默认全队列：与自动价格轮同组成，后台串行链）| appids | wishlist
-    # | wishlist_only | owned | pool（全池，愿望单优先序排前）
+    # | wishlist_only | owned | discounted（库内折扣中，最大折扣率降序）
+    # | pool（全池，愿望单优先序排前）
     appids: list[int] | None = None
     regions: list[str] | None = None
     kind: str = "manual"  # manual | missing | backfill（定时层专用 kind 亦可显式触发）

@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import desc, func, or_, select, text
 
 from app.core.database import WritePriority, get_session_factory, write_gate
 from app.core.events import bus
@@ -182,8 +182,9 @@ async def resolve_scope_appids(scope: str, appids: list[int] | None) -> list[tup
 
     scope: appids（显式列表，最高优先级，原样直用）| wishlist（全部活跃
     监控条目，含已购）| wishlist_only（活跃且非已购）| owned（活跃且已购）
-    | pool（监控层）| catalog（目录层）| specials（特惠榜尾段）。
-    前四种按第一优先级（愿望单/关注）→ hot（打折/史低）→ appid 序排。
+    | discounted（库内折扣中，最大折扣率降序）| pool（监控层）| catalog
+    （目录层）| specials（特惠榜尾段）。
+    wishlist 三种按第一优先级（愿望单/关注）→ hot（打折/史低）→ appid 序排。
 
     wishlist 含已购是历史合并路径（跟随模式沿用，不为拆分多付一次预检）；
     自定义已购区域时用 wishlist_only + owned 两个 job 分道抓取。
@@ -234,6 +235,31 @@ async def resolve_scope_appids(scope: str, appids: list[int] | None) -> list[tup
             (a, "")
             for a in await _wishlist_ordered(wl_ids, manual_ids, wishlisted_ids)
         ]
+
+    if scope == "discounted":
+        # 折扣中游戏：库内任一地区 discount_percent > 0 的在库行（排除下架
+        # 宽限期外与永久免费，同 catalog 口径）。**纯库内查询**——折扣事实由
+        # browse 每轮写入 GameCurrentPrice.discount_percent，本 scope 只把正在
+        # 打折的对象拎出来立即复刷，不打任何新的 Steam 接口。排序：跨地区
+        # 最大折扣率降序 → appid 升序，折扣最狠的排头先刷。
+        async with get_session_factory()() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        GameCurrentPrice.appid,
+                        func.max(GameCurrentPrice.discount_percent).label("max_off"),
+                    )
+                    .join(Game, Game.appid == GameCurrentPrice.appid)
+                    .where(
+                        GameCurrentPrice.discount_percent > 0,
+                        Game.removed_at.is_(None),
+                        Game.free_kind.is_(None),
+                    )
+                    .group_by(GameCurrentPrice.appid)
+                    .order_by(desc("max_off"), GameCurrentPrice.appid)
+                )
+            ).all()
+        return [(int(r.appid), "") for r in rows]
 
     if scope == "pool":
         # 监控池：只取 Monitoring 层（有有效来源且未被排除）。下架宽限期外
