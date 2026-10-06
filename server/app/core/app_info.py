@@ -17,9 +17,10 @@ APP_SLUG = "holdexar"
 # 便于环境变量覆盖；发布脚本读的也是这里）。发版时只改这一行。
 # 放在 app_info 而非 config：config 要 import pydantic，而发布/构建脚本、
 # run.py、desktop/main.py 需要在装依赖之前就能取到版本号。
-# fork 版本方案：0.1.1-plus.N——semver 预发布段按 N 递增可比，基线 0.1.1-plus.1
-# 严格大于原版 0.1.0 系（0.1.1 > 0.1.0），此后每次对外发布递增 plus.N。
-APP_VERSION = "0.1.1-plus.3"
+# fork 版本方案（0.2.0 起转正式）：0.1.1-plus.N 开发线已结束（plus.3 为末版）；
+# 正式版按 semver 走——新增功能升次版本（0.2.0）、修 bug 升修订号（0.2.1…）。
+# 0.2.0 > 0.1.1-plus.3 严格成立，老客户端可正常收到升级。
+APP_VERSION = "0.2.0"
 
 # 发布仓库（owner/repo）：应用内自更新清单、发布脚本（release/publish/build_manifest）
 # 与 /info 展示的唯一来源。HoldexarPlus fork 基线：只认本仓库的发布——原作者发新版
