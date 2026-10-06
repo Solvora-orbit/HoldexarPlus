@@ -176,7 +176,7 @@ watch(() => tour.open, (open) => {
 })
 
 const logo = computed(() =>
-  themeStore.isDark ? '/assets/logo_dark.ico' : '/assets/logo_light.ico',
+  themeStore.isDark ? '/assets/logo_dark.png' : '/assets/logo_light.png',
 )
 
 /* ── 侧边栏：按用户目的分三组——首页不带组名直接置顶，找游戏 /

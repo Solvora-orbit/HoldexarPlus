@@ -40,9 +40,9 @@ const maskId = useId()
 const themeStore = useThemeStore()
 const { t } = useI18n()
 
-/* 品牌图（与侧边栏同一来源：主题联动的双版本素材） */
+/* 品牌图（与侧边栏同一来源：主题联动的双版本素材；PNG 品牌位见 appInfo 注释） */
 const brandLogo = computed(() =>
-  themeStore.isDark ? '/assets/logo_dark.ico' : '/assets/logo_light.ico',
+  themeStore.isDark ? '/assets/logo_dark.png' : '/assets/logo_light.png',
 )
 
 interface TourStep {

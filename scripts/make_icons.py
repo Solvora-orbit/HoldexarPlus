@@ -9,7 +9,10 @@
 
 用法：server/.venv/Scripts/python.exe scripts/make_icons.py
 产物：web/public/logo.ico、desktop/app.ico、
-     web/public/assets/logo_dark.ico、web/public/assets/logo_light.ico
+     web/public/assets/logo_dark.ico、web/public/assets/logo_light.ico、
+     web/public/assets/logo_dark.png、web/public/assets/logo_light.png
+     （PNG 128px 供侧栏 <img> 品牌位显示——ICO 走 <img> 时浏览器选帧有
+     运气成分，常挑 16/32 小帧导致模糊；ICO 保留给原生壳与 favicon。）
 （另在 %TEMP% 落一张 preview.png 供人工目检，不入库。）
 """
 from __future__ import annotations
@@ -140,6 +143,13 @@ def main() -> None:
     dark_out = ROOT / "web" / "public" / "assets" / "logo_dark.ico"
     dark_out.parent.mkdir(parents=True, exist_ok=True)
     _save_ico(dark, dark_out)
+
+    # 侧栏品牌位 PNG（128px，带 PLUS 字样档）：<img> 引用清晰可控
+    for palette, name in ((DARK, "logo_dark.png"), (LIGHT, "logo_light.png")):
+        png = _master(palette, with_wordmark=True).resize((128, 128), Image.LANCZOS)
+        png_out = ROOT / "web" / "public" / "assets" / name
+        png.save(png_out)
+        print(f"  {png_out.name}: {png_out.stat().st_size} bytes")
 
     # 预览图（不入库）：人工目检用
     preview = Path(tempfile.gettempdir()) / "holdexarplus_icon_preview.png"

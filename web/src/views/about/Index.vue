@@ -17,7 +17,7 @@ const { t } = useI18n()
 const themeStore = useThemeStore()
 const tour = useTourStore()
 const logo = computed(() =>
-  themeStore.isDark ? '/assets/logo_dark.ico' : '/assets/logo_light.ico',
+  themeStore.isDark ? '/assets/logo_dark.png' : '/assets/logo_light.png',
 )
 
 interface SystemInfo {

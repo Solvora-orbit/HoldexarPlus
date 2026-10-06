@@ -229,6 +229,8 @@ onMounted(load)
   flex-direction: column;
   gap: 16px;
   max-width: 720px;
+  /* 与任务页（.crawl-page）同构：窄容器水平居中，整页不再偏左 */
+  margin: 0 auto;
 }
 
 .fetch-page__head {
