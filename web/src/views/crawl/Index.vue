@@ -27,6 +27,8 @@ const jobs = ref<CrawlJob[]>([])
 const loading = ref(false)
 const manualAppids = ref('')
 const scope = ref<'all' | 'appids' | 'wishlist' | 'discounted' | 'owned' | 'pool'>('all')
+/** 抓取口径说明默认收起：想看的人展开，不干扰常用路径 */
+const explainOpen = ref(false)
 
 /** 区服列表（服务端下发，含 enabled 状态）；null = 全部启用。
     作用：已购游戏抓取地区的全选/清空备选集与「跟随监控地区」计数
@@ -577,14 +579,14 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="start-row">
+      <div class="start-row start-row--center">
         <el-radio-group v-model="scope">
-          <el-radio-button value="all">{{ t('crawl.start.scopeAll') }}</el-radio-button>
-          <el-radio-button value="wishlist">{{ t('crawl.start.scopeWishlist') }}</el-radio-button>
-          <el-radio-button value="discounted">{{ t('crawl.start.scopeDiscounted') }}</el-radio-button>
-          <el-radio-button value="owned">{{ t('crawl.start.scopeOwned') }}</el-radio-button>
-          <el-radio-button value="pool">{{ t('crawl.start.scopePool') }}</el-radio-button>
-          <el-radio-button value="appids">{{ t('crawl.start.scopeAppids') }}</el-radio-button>
+          <el-radio-button value="all" :title="t('crawl.scopeTip.all')">{{ t('crawl.start.scopeAll') }}</el-radio-button>
+          <el-radio-button value="wishlist" :title="t('crawl.scopeTip.wishlist')">{{ t('crawl.start.scopeWishlist') }}</el-radio-button>
+          <el-radio-button value="discounted" :title="t('crawl.scopeTip.discounted')">{{ t('crawl.start.scopeDiscounted') }}</el-radio-button>
+          <el-radio-button value="owned" :title="t('crawl.scopeTip.owned')">{{ t('crawl.start.scopeOwned') }}</el-radio-button>
+          <el-radio-button value="pool" :title="t('crawl.scopeTip.pool')">{{ t('crawl.start.scopePool') }}</el-radio-button>
+          <el-radio-button value="appids" :title="t('crawl.scopeTip.appids')">{{ t('crawl.start.scopeAppids') }}</el-radio-button>
         </el-radio-group>
         <el-input
           v-if="scope === 'appids'"
@@ -594,7 +596,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div class="start-row">
+      <div class="start-row start-row--center">
         <!-- 艺术按键方案二（outline）：启动 = 暖橙 / 停止 = 深色，见 component-framework.html -->
         <HlButton
           art="outline"
@@ -632,6 +634,26 @@ onBeforeUnmount(() => {
         <HlButton variant="default" :title="t('crawl.jobs.refresh')" @click="loadJobs">
           <HlIcon name="refresh" />
         </HlButton>
+      </div>
+
+      <!-- 抓取口径说明（plus.3）：用白话回答「会不会删/覆盖已抓的数据、
+           总数为什么会变」——这是被反复问到的疑虑，主动交代 -->
+      <div class="crawl-explain">
+        <button type="button" class="crawl-explain__toggle" @click="explainOpen = !explainOpen">
+          <HlIcon name="info" :size="14" />
+          {{ t('crawl.explain.title') }}
+          <svg
+            class="crawl-explain__chevron"
+            :class="{ open: explainOpen }"
+            viewBox="0 0 24 24" width="13" height="13"
+            fill="none" stroke="currentColor" stroke-width="2"
+          ><polyline points="6 9 12 15 18 9" /></svg>
+        </button>
+        <div v-show="explainOpen" class="crawl-explain__body">
+          <p>{{ t('crawl.explain.b1') }}</p>
+          <p>{{ t('crawl.explain.b2') }}</p>
+          <p>{{ t('crawl.explain.b3') }}</p>
+        </div>
       </div>
 
       <!-- 系统侧活动：体检不是任务，排队中的请求还没开始产出进度，
@@ -946,6 +968,52 @@ onBeforeUnmount(() => {
   gap: 12px;
   margin-top: 12px;
   flex-wrap: wrap;
+}
+
+.start-row--center {
+  justify-content: center;
+}
+
+/* 抓取口径说明（可展开）：默认一行入口，展开后三条白话 */
+.crawl-explain {
+  margin-top: 4px;
+}
+.crawl-explain__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin: -2px -8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.crawl-explain__toggle:hover {
+  background: var(--hover-soft);
+  color: var(--accent);
+}
+.crawl-explain__chevron {
+  transform: rotate(-90deg);
+  transition: transform 0.2s;
+}
+.crawl-explain__chevron.open {
+  transform: rotate(0deg);
+}
+.crawl-explain__body {
+  margin-top: 8px;
+  padding: 10px 14px;
+  border: 1px dashed var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+}
+.crawl-explain__body p {
+  font-size: 12.5px;
+  line-height: 1.9;
+  color: var(--text-secondary);
 }
 
 .start-row__appids {

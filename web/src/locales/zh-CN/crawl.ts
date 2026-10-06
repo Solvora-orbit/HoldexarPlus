@@ -45,6 +45,22 @@ const crawl = {
   'crawl.start.scopeOwned': '已购游戏库',
   'crawl.start.scopePool': '监控池',
   'crawl.start.scopeAppids': '指定 AppID',
+  /* 各方案一句话口径（radio hover 提示） */
+  'crawl.scopeTip.all': '缺价补齐 → 监控池 → 目录刷新，并收编特惠榜新面孔',
+  'crawl.scopeTip.wishlist': '把愿望单与已关注的游戏价格刷新一遍',
+  'crawl.scopeTip.discounted': '把库里正在打折的游戏立即复刷（不打新接口）',
+  'crawl.scopeTip.owned': '刷新已购游戏库的在架价格',
+  'crawl.scopeTip.pool': '按监控池层级逐区抓取',
+  'crawl.scopeTip.appids': '指定一款或多款游戏（逗号分隔 AppID），直接入队抓取',
+
+  /* 抓取口径说明（可展开，plus.3）：回答「会不会删/覆盖」「总数为何变化」 */
+  'crawl.explain.title': '抓取会删除或覆盖已抓过的游戏吗？总数为什么会变？',
+  'crawl.explain.b1':
+    '不会删除、也不会覆盖：抓取对数据库只做「新增和更新」（UPSERT），任何方案都不会删掉已抓过的游戏。',
+  'crawl.explain.b2':
+    '方案只是决定「这一轮先抓谁」：全部游戏 = 先补缺价的，再抓监控池，顺带把特惠榜的新面孔收入目录；折扣中游戏 = 把库里正在打折的游戏立即复刷一遍。',
+  'crawl.explain.b3':
+    '总数变少不是数据丢了：列表只统计「国区在售且有价格」的游戏，复刷会把 Steam 的当前真相写回——锁区、转免费、折扣结束的游戏会暂时跌出统计。数据都还在，找游戏页把筛选切到「锁国区」就能看到它们。',
   'crawl.start.appidsPlaceholder': '例如 620,105600',
   'crawl.start.button': '启动任务',
   'crawl.start.running': '任务进行中…',

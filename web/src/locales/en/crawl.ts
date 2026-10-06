@@ -35,6 +35,23 @@ const crawl: Partial<Record<MessageKey, string>> = {
   'crawl.start.scopeOwned': 'Owned library',
   'crawl.start.scopePool': 'Watch pool',
   'crawl.start.scopeAppids': 'Specific AppIDs',
+  /* One-line scope per radio option (hover tips) */
+  'crawl.scopeTip.all': 'Missing prices → watch pool → catalog refresh, plus specials new faces',
+  'crawl.scopeTip.wishlist': 'Refresh prices for every wishlisted and followed game',
+  'crawl.scopeTip.discounted': 'Re-observe the currently discounted games in your library (no new endpoints)',
+  'crawl.scopeTip.owned': 'Refresh listing prices across the owned library',
+  'crawl.scopeTip.pool': 'Fetch region by region following the watch pool layers',
+  'crawl.scopeTip.appids': 'One or more AppIDs (comma separated), queued directly',
+
+  /* Crawl scope explainer (collapsible, plus.3): "does it delete/overwrite",
+     "why does the total change" — asked often, answered up front */
+  'crawl.explain.title': 'Does crawling delete or overwrite games already fetched? Why does the total change?',
+  'crawl.explain.b1':
+    'Nothing is deleted or overwritten: crawling only inserts and updates (UPSERT). No plan ever removes games already in your library.',
+  'crawl.explain.b2':
+    'A plan only decides what gets fetched this round: All games fills missing prices, then the watch pool, and collects new faces from the specials chart; On discount re-observes the currently discounted games in your library.',
+  'crawl.explain.b3':
+    'A shrinking total is not lost data: lists only count games with a live CN price. Re-observing writes Steam\u2019s current truth back — region-locked, now-free or sale-ended games temporarily drop out of the count. The data stays; switch the Find-games filter to "CN-locked" to see them.',
   'crawl.start.appidsPlaceholder': 'e.g. 620,105600',
   'crawl.start.button': 'Start task',
   'crawl.start.running': 'Running…',
