@@ -37,7 +37,6 @@ const bundles = {
   'bundleshub.history.refreshing': '正在抓取月包…',
   'bundleshub.history.window': '抓取窗口',
   'bundleshub.history.windowOpt': '{n} 期',
-  'bundleshub.history.windowHint': '含当月，最多 {max} 期（2 年）',
   'bundleshub.history.started': '已开始补抓，完成后记录会自动出现',
   'bundleshub.history.done': '历史补抓完成',
 
@@ -56,6 +55,9 @@ const bundles = {
   'bundles.humble.collapse': '收起列表',
   'bundles.humble.resolving': '关联中',
   'bundles.humble.ingesting': '收录中',
+  'bundles.humble.tier': '第 {i} 档',
+  'bundles.humble.tierMeta': '共含 {n} 款 · 本档新增 {m}',
+  'bundles.humble.tierEmpty': '本档没有新增游戏',
   'bundles.humble.detailEmpty': '包内游戏尚未解析完成（后台抓取会逐轮补齐），稍后再来查看。',
 
   /* ── Steam 捆绑包面板（components/business/SteamBundlesPanel.vue，0.2.0）── */

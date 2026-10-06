@@ -1275,6 +1275,23 @@ async def _job_humble_catchup() -> None:
         logger.exception("[调度] HB 捆绑包启动补跑异常（不阻塞启动）")
 
 
+async def _job_humble_ingest() -> None:
+    """HB 捆绑包收录扫描（0.2.2，每日 07:05）：在售包内已解析但目录缺行的
+    游戏批量登记首爬。与详情抓取解耦——06:55 刷新失败/跳过的日子，欠账
+    照常补；候选以 games 行存在性为账，首爬成功即退出，天然幂等。"""
+    if not await content_fetch_enabled("fetch.humble_bundles"):
+        return
+    from app.domains.humble import service as humble_service
+
+    try:
+        result = await humble_service.scan_missing_ingest()
+        if result.get("queued"):
+            logger.info("[调度] HB 捆绑包收录：登记首爬 %d 款（候选 %d）",
+                        result["queued"], result.get("candidates", 0))
+    except Exception:  # noqa: BLE001
+        logger.exception("[调度] HB 捆绑包收录扫描异常（次日自动重试）")
+
+
 async def _job_coming_soon_retry() -> None:
     """COMING_SOON 重探层（每日 10:00，限量 20 个）：
 
@@ -1503,6 +1520,8 @@ def start_scheduler() -> None:
     scheduler.add_job(_job_hb_choice, "cron", hour=6, minute=40, id="hb_choice")
     # HB 商店捆绑包：列表+在售详情+包内关联，每日 06:55（月包 06:40 错峰）
     scheduler.add_job(_job_humble_bundles, "cron", hour=6, minute=55, id="humble_bundles")
+    # 收录扫描（0.2.2）：未入目录的包内游戏补首爬，独立一拍不依赖刷新成败
+    scheduler.add_job(_job_humble_ingest, "cron", hour=7, minute=5, id="humble_ingest")
     scheduler.add_job(_job_epic_free, "cron", hour=7, minute=10, id="epic_free")
     # Steam 活动日历：官方文档页低频变更，每日一拍足够；05:00 避开已占分钟
     scheduler.add_job(

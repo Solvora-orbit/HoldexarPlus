@@ -31,6 +31,9 @@ class HumbleBundle(Base):
     end_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     on_sale: Mapped[bool] = mapped_column(Boolean, default=True)  # 档期内（end_at 未到）
     game_count: Mapped[int] = mapped_column(Integer, default=0)  # 包内条目数（全量，含未解析）
+    # 价格档位（0.2.2）：JSON [{id, price_cny_fen, header, titles, is_initial}]，
+    # titles 为**本档新增**（累进售卖，累计展开由 API 层算）；NULL = 旧数据未解析过档位
+    tiers_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # 用户已读时刻：NULL = 本轮扫出的新包未读（前端 NEW 徽章，点击标记已读）。
     # 存量库经列保障 ALTER 带 DEFAULT CURRENT_TIMESTAMP = 视为已读（升级不涌 NEW）；
     # 新行写侧显式置 None（未读）。

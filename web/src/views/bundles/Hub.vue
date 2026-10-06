@@ -289,7 +289,6 @@ const monthCountLabel = computed(() =>
           :disabled="running"
           @update:model-value="selectWindow"
         />
-        <span class="hub-window__hint">{{ t('bundleshub.history.windowHint', { max: maxMonthsBack }) }}</span>
         <HlButton size="sm" variant="text" :disabled="running" :loading="running" @click="refreshHistory">
           <HlIcon v-if="!running" name="refresh" :size="14" />
           {{ t('bundleshub.history.refresh') }}
@@ -439,11 +438,6 @@ const monthCountLabel = computed(() =>
 .hub-window {
   width: 110px;
   flex-shrink: 0;
-}
-.hub-window__hint {
-  font-size: 10.5px;
-  color: var(--text-dim);
-  margin-right: 4px;
 }
 .hub-month {
   display: inline-flex;

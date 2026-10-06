@@ -8,7 +8,7 @@
    与外层一致（收录中的条目以轻量行列出，状态注明）。 */
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 
-import { humbleApi, type HumbleBundleItem, type HumblePendingGame } from '@/api/client'
+import { humbleApi, type HumbleBundleItem, type HumblePendingGame, type HumbleTier } from '@/api/client'
 import { formatCnyFen } from '@/api/regions'
 import { APP_SLUG } from '@/appInfo'
 import { useRegionsStore } from '@/stores/regions'
@@ -104,6 +104,15 @@ function daysLeft(endAt: string | null): number | null {
   return ms > 0 ? Math.max(1, Math.ceil(ms / 86400000)) : 0
 }
 
+/* 倒计时三档（0.2.2 全包显示）：≤3 天紧迫红 / ≤14 天警示 / 其余弱化 */
+function urgencyClass(endAt: string | null): string {
+  const d = daysLeft(endAt)
+  if (d === null) return ''
+  if (d <= 3) return 'is-hot'
+  if (d <= 14) return 'is-warn'
+  return 'is-cool'
+}
+
 // ─── 包详情抽屉（可拖宽，宽度记忆；点开 = 已读清 NEW）───
 /* 初始宽取 px 数字串（HlDrawer 的 resizable 初始宽要可 parseInt；超视口由拖拽钳制兜底） */
 const drawerWidth = '980px'
@@ -113,12 +122,42 @@ const detail = ref<HumbleBundleItem | null>(null)
 const detailItems = ref<GameListItem[]>([])
 const detailTotal = ref(0)
 const detailPending = ref<HumblePendingGame[]>([])
+/* 价格档位（0.2.2）：非空则抽屉按档分组；旧数据空数组回退平铺 */
+const detailTiers = ref<HumbleTier[]>([])
+
+/* appid → 卡片；title → pending 状态：档位组内非卡片条目回挂 */
+const cardByAppid = computed(() => {
+  const m = new Map<number, GameListItem>()
+  for (const g of detailItems.value) m.set(g.appid, g)
+  return m
+})
+const pendingByTitle = computed(() => {
+  const m = new Map<string, HumblePendingGame>()
+  for (const p of detailPending.value) m.set(p.title, p)
+  return m
+})
+/** 档位组里没卡片的游戏行的状态文案键 */
+function rowStatusKey(title: string, appid: number | null): string {
+  const p = pendingByTitle.value.get(title)
+  if (p) return p.status === 'ingesting' ? 'bundles.humble.ingesting' : 'bundles.humble.resolving'
+  return appid == null ? 'bundles.humble.resolving' : 'bundles.humble.ingesting'
+}
+/** 不属于任何档位的 pending 行（旧数据/边缘：条目在但档位清单没它）兜底组 */
+const tierTitles = computed(() => {
+  const s = new Set<string>()
+  for (const t of detailTiers.value) for (const g of t.newGames) s.add(g.title)
+  return s
+})
+const loosePending = computed(() =>
+  detailPending.value.filter((p) => !tierTitles.value.has(p.title)),
+)
 
 async function openBundle(b: HumbleBundleItem) {
   detail.value = b
   detailItems.value = []
   detailTotal.value = 0
   detailPending.value = []
+  detailTiers.value = []
   open.value = true
   detailLoading.value = true
   try {
@@ -127,6 +166,7 @@ async function openBundle(b: HumbleBundleItem) {
     detailItems.value = res.items
     detailTotal.value = res.total
     detailPending.value = res.pending ?? []
+    detailTiers.value = res.tiers ?? []
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   } finally {
@@ -173,7 +213,7 @@ async function openBundle(b: HumbleBundleItem) {
               </template>
             </HlImg>
             <span v-if="b.isNew" class="hb-card__new">NEW</span>
-            <span v-if="daysLeft(b.endAt) !== null && daysLeft(b.endAt)! <= 7" class="hb-card__ending">
+            <span v-if="daysLeft(b.endAt) !== null" class="hb-card__ending" :class="urgencyClass(b.endAt)">
               {{ t('bundles.humble.ending', { d: daysLeft(b.endAt) }) }}
             </span>
           </div>
@@ -227,7 +267,39 @@ async function openBundle(b: HumbleBundleItem) {
         <HlSpinner /> {{ t('library.loadingMore') }}
       </div>
       <template v-else>
-        <div v-if="detailItems.length" class="hb-drawer__grid">
+        <!-- 档位分组（0.2.2）：每档本档新增的游戏；卡片在它首次出现的档渲染，
+             累计数在组头——买第 k 档 = 第 1..k 组全部内容 -->
+        <section v-for="(t0, ti) in detailTiers" :key="t0.id" class="hb-tier">
+          <header class="hb-tier__head">
+            <span class="hb-tier__name">{{ t('bundles.humble.tier', { i: ti + 1 }) }}</span>
+            <span v-if="t0.priceCnyFen != null" class="hb-tier__price">{{ formatCnyFen(t0.priceCnyFen) }}</span>
+            <span class="hb-tier__meta">
+              {{ t('bundles.humble.tierMeta', { n: t0.count, m: t0.newCount }) }}
+            </span>
+          </header>
+          <div v-if="t0.newGames.length === 0" class="hb-tier__empty">
+            {{ t('bundles.humble.tierEmpty') }}
+          </div>
+          <div v-else class="hb-tier__body">
+            <template v-for="g in t0.newGames" :key="g.title">
+              <HlGameCard
+                v-if="g.appid != null && cardByAppid.has(g.appid)"
+                :game="cardByAppid.get(g.appid)!"
+                layout-mode="grid"
+                :enabled-regions="regionsStore.enabledCodes"
+              />
+              <!-- 没卡片的游戏：轻量行（关联中/收录中状态行内标注） -->
+              <div v-else class="hb-pending__row is-inline">
+                <span class="hb-pending__dot" aria-hidden="true"></span>
+                <span class="hb-pending__name">{{ g.title }}</span>
+                <span class="hb-pending__status">{{ t(rowStatusKey(g.title, g.appid)) }}</span>
+              </div>
+            </template>
+          </div>
+        </section>
+
+        <!-- 无档位数据（旧包未重抓）：回退平铺卡片 -->
+        <div v-if="!detailTiers.length && detailItems.length" class="hb-drawer__grid">
           <HlGameCard
             v-for="game in detailItems"
             :key="game.appid"
@@ -236,9 +308,9 @@ async function openBundle(b: HumbleBundleItem) {
             :enabled-regions="regionsStore.enabledCodes"
           />
         </div>
-        <!-- 收录中条目：与卡片合计 = 外层计数（0.2.1 一致性） -->
-        <ul v-if="detailPending.length" class="hb-pending">
-          <li v-for="p in detailPending" :key="p.title" class="hb-pending__row">
+        <!-- 不属于任何档位的欠账条目（兜底组，保证外层计数与抽屉一致） -->
+        <ul v-if="loosePending.length" class="hb-pending">
+          <li v-for="p in loosePending" :key="p.title" class="hb-pending__row">
             <span class="hb-pending__dot" aria-hidden="true"></span>
             <span class="hb-pending__name">{{ p.title }}</span>
             <span class="hb-pending__status">
@@ -246,7 +318,7 @@ async function openBundle(b: HumbleBundleItem) {
             </span>
           </li>
         </ul>
-        <HlEmpty v-if="!detailItems.length && !detailPending.length" icon="" size="sm">
+        <HlEmpty v-if="!detailItems.length && !loosePending.length && !detailTiers.length" icon="" size="sm">
           <p>{{ t('bundles.humble.detailEmpty') }}</p>
         </HlEmpty>
       </template>
@@ -338,10 +410,66 @@ async function openBundle(b: HumbleBundleItem) {
   right: 8px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: var(--danger);
-  color: var(--ink-on-fill);
   font-size: 10.5px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+/* 倒计时三档（0.2.2 全包显示）：紧迫红 / 警示 / 弱化 */
+.hb-card__ending.is-hot { background: var(--danger); color: var(--ink-on-fill); }
+.hb-card__ending.is-warn { background: var(--warning); color: var(--ink-on-fill); }
+.hb-card__ending.is-cool {
+  background: var(--surface-chip-2);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.hb-tier {
+  margin-bottom: 14px;
+}
+.hb-tier__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 0 8px;
+  border-bottom: 1px solid var(--line-1);
+  margin-bottom: 10px;
+}
+.hb-tier__name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.hb-tier__price {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--success);
+  font-variant-numeric: tabular-nums;
+}
+.hb-tier__meta {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.hb-tier__empty {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 6px 0;
+}
+.hb-tier__body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+  grid-auto-rows: 1fr;
+}
+.hb-tier__body > :deep(.game-card) {
+  height: 100%;
+}
+.hb-pending__row.is-inline {
+  border: 1px dashed var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-inset);
+  padding: 10px 12px;
 }
 .hb-card__body {
   padding: 10px 12px 12px;

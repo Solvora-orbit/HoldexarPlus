@@ -1521,10 +1521,26 @@ export interface HumblePendingGame {
   status: 'resolving' | 'ingesting'
 }
 
+/** 价格档位（0.2.2）：newGames 为本档新增（累计语义），count = 买这档共含款数 */
+export interface HumbleTierGame {
+  title: string
+  appid: number | null
+}
+
+export interface HumbleTier {
+  id: string
+  priceCnyFen: number | null
+  isInitial: boolean
+  newGames: HumbleTierGame[]
+  newCount: number
+  count: number
+}
+
 export interface HumbleBundleDetailPayload extends Omit<HumbleBundleItem, 'isNew'> {
   items: GameListItem[]
   total: number
   pending: HumblePendingGame[]
+  tiers: HumbleTier[]
 }
 
 export const humbleApi = {

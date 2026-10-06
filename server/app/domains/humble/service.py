@@ -41,12 +41,20 @@ _GAMES_LIST_PATH = "/games"
 _ALLOWED_HOSTS = frozenset({"zh.humblebundle.com", "www.humblebundle.com"})
 
 _PRODUCT_ARR_RE = re.compile(r'"products"\s*:\s*\[')
-# 详情条目锚点：platforms_and_oses 前最近的 image_text 即该 display 对象的游戏名
-# （前瞻保留 { 在串内：raw_decode 必须从 { 起解）
+# 详情条目锚点：platforms_and_oses 前瞻（raw_decode 要从 { 起解）
 _PLAT_RE = re.compile(r'"platforms_and_oses"\s*:\s*(?=\{)')
 _NAME_RE = re.compile(r'"image_text"\s*:\s*"([^"]+)"')
+# display 条目对象的机器名锚点：条目对象以 "machine_name": "<m>" 开头，
+# 两锚之间切段可无窗重叠地把 platforms/image_text 归属到正确条目
+_MACHINE_RE = re.compile(r'"machine_name":\s*"([^"]+)"')
+# 档位数据（0.2.2）：每档价格与每档新增内容的机名清单
+_TIER_PRICING_RE = re.compile(r'"tier_pricing_data"\s*:\s*(?=\{)')
+_TIER_DISPLAY_RE = re.compile(r'"tier_display_data"\s*:\s*(?=\{)')
 _PRICE_RE = re.compile(r'"preset_prices"\s*:\s*(\[)')
 _ISO_RE = re.compile(r'^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})')
+# 慈善/通用角标条目不是游戏：机名或标题命中即剔
+_NON_GAME_HINTS = ("charity", "child's play", "pay what you want", "coupon")
+_SEGMENT_MAX = 9000
 
 _REFRESH_LOCK = asyncio.Lock()
 _refresh_task: asyncio.Task | None = None
@@ -149,12 +157,91 @@ def parse_games_list(html_text: str) -> list[dict]:
     return out
 
 
+def _parse_game_items(html_text: str, bundle_name: str) -> dict[str, str]:
+    """详情页 → {machine_name: title}（仅 Steam 游戏条目）。
+
+    条目对象以 `"machine_name": "<m>"` 开头（availability/soundtrack 等长
+    字段在后），用相邻 machine_name 锚切段——段内找 platforms_and_oses 与
+    image_text，归属天然无窗重叠歧义（旧版「anchor 前 1500 字符回看」在
+    条目密集处会串到上一条目）。慈善/soundtrack 等非游戏条目段没有
+    platforms_and_oses，或平台里没有 steam，直接落选。"""
+    lowered = (bundle_name or "").lower()
+    anchors = [(m.start(), m.group(1)) for m in _MACHINE_RE.finditer(html_text)]
+    items: dict[str, str] = {}
+    for i, (pos, machine) in enumerate(anchors):
+        end = anchors[i + 1][0] if i + 1 < len(anchors) else min(len(html_text), pos + _SEGMENT_MAX)
+        end = min(end, pos + _SEGMENT_MAX)
+        seg = html_text[pos:end]
+        pm = _PLAT_RE.search(seg)
+        if pm is None:
+            continue
+        obj = _decode_at(seg, pm.end(), "{", "}")
+        if not isinstance(obj, dict):
+            continue
+        game = obj.get("game") or obj.get("software") or {}
+        if "steam" not in game:
+            continue
+        nm = _NAME_RE.search(seg)
+        title = (nm.group(1) if nm else "").strip()
+        low = title.lower()
+        if not title or low == lowered:
+            continue
+        if any(k in low for k in _NON_GAME_HINTS) or any(k in machine.lower() for k in _NON_GAME_HINTS):
+            continue
+        items.setdefault(machine, title)
+    return items
+
+
+def _parse_tiers(html_text: str, machine_titles: dict[str, str]) -> list[dict]:
+    """档位数据 → [{id, price_cny_fen, header, titles}]（每档**本档新增**）。
+
+    tier_pricing_data：每档 CNY 价 + is_initial_tier/is_free/should_be_included；
+    tier_display_data：每档页内文案 + tier_item_machine_names（本档新增机名）。
+    档位是累进售卖：购买价 N 拿到 ≤N 全部档内容——本函数只给「新增」，
+    累计展开由 API 层做（显示语义）。伪档（less_than_initial）、免费档、
+    无 CNY 价的档剔除；机名映射不到游戏时保留占位标题（前端按未解析展示）。"""
+    pm = _TIER_PRICING_RE.search(html_text)
+    if pm is None:
+        return []
+    pricing = _decode_at(html_text, pm.end(), "{", "}")
+    if not isinstance(pricing, dict):
+        return []
+    dm = _TIER_DISPLAY_RE.search(html_text)
+    display = _decode_at(html_text, dm.end(), "{", "}") if dm else {}
+    if not isinstance(display, dict):
+        display = {}
+    tiers: list[dict] = []
+    for tid, pdata in pricing.items():
+        if not isinstance(pdata, dict):
+            continue
+        if pdata.get("is_free") or not pdata.get("should_be_included_in_tier_list", True):
+            continue
+        price = _cny_to_fen(pdata.get("price|money"))
+        if not price:
+            continue
+        d = display.get(tid) if isinstance(display.get(tid), dict) else {}
+        machines = d.get("tier_item_machine_names") or []
+        titles = [
+            machine_titles.get(str(m), "") or str(m).replace("_", " ").title()
+            for m in machines if isinstance(m, str) and m
+        ]
+        tiers.append({
+            "id": tid,
+            "price_cny_fen": price,
+            "header": str(d.get("header") or ""),
+            "titles": titles,
+            "is_initial": bool(pdata.get("is_initial_tier")),
+        })
+    tiers.sort(key=lambda t: (t["price_cny_fen"], not t["is_initial"], t["id"]))
+    return tiers
+
+
 def parse_bundle_detail(html_text: str, bundle_name: str) -> dict:
-    """详情页 → {price_cny_fen, titles}。
+    """详情页 → {price_cny_fen, titles, tiers}。
 
     价格：preset_prices 最低档（PWYW 包起步价 = 用户口中的「捆绑包价格」）。
-    条目：带 platforms_and_oses.game.steam 的 display 对象的 image_text；
-    剔除慈善条目与包名自身（同一名字可能出现在头图/角标位）。"""
+    条目：全部 Steam 游戏标题（0.2.2 起 = 各档新增的并集，由 machine_name
+    切段判定的游戏条目）。档位：见 _parse_tiers。"""
     price_fen: int | None = None
     pm = _PRICE_RE.search(html_text)
     if pm:
@@ -165,33 +252,10 @@ def parse_bundle_detail(html_text: str, bundle_name: str) -> dict:
             if amounts:
                 price_fen = min(amounts)
 
-    titles: list[str] = []
-    lowered = (bundle_name or "").lower()
-    for m in _PLAT_RE.finditer(html_text):
-        obj = _decode_at(html_text, m.end(), "{", "}")
-        if not isinstance(obj, dict):
-            continue
-        game = obj.get("game") or obj.get("software") or {}
-        if "steam" not in game:
-            continue
-        seg = html_text[max(0, m.start() - 1500):m.start()]
-        names = _NAME_RE.findall(seg)
-        if not names:
-            continue
-        title = names[-1]
-        if not title or title.lower() == lowered:
-            continue
-        if any(k in title.lower() for k in ("charity", "child's play", "pay what you want")):
-            continue
-        if title not in titles:
-            titles.append(title)
-    return {"price_cny_fen": price_fen, "titles": titles}
-
-    titles: list[str] = []
-    lowered = (bundle_name or "").lower()
-    for m in _PLAT_RE.finditer(html_text):
-        obj = _decode_at(html_text, m.end(), "{", "}")
-    return {"price_cny_fen": price_fen, "titles": titles}
+    machine_titles = _parse_game_items(html_text, bundle_name)
+    titles = list(dict.fromkeys(machine_titles.values()))
+    tiers = _parse_tiers(html_text, machine_titles)
+    return {"price_cny_fen": price_fen, "titles": titles, "tiers": tiers}
 
 
 async def _fetch_page(session: aiohttp.ClientSession, proxy: str | None, url: str) -> str | None:
@@ -288,7 +352,8 @@ async def _sync_bundle_detail(
             resolved[title] = appid
         await asyncio.sleep(0.3)
 
-    # 解析成功但目录无行的 appid → 单独首爬补收录（与月包补价同款语义）
+    # 解析成功但目录无行的 appid：只收集回传（0.2.2 收录链解耦——刷新末尾
+    # 批量登记首爬，独立 ingest_scan 每日续跑；不在每包循环里各发任务）
     need_ingest: list[int] = []
     if resolved:
         async with get_session_factory()() as s:
@@ -298,16 +363,6 @@ async def _sync_bundle_detail(
                 )
             }
         need_ingest = sorted({a for a in resolved.values() if a not in have})
-        if need_ingest:
-            try:
-                from app.domains.crawl import service as crawl_service
-
-                await crawl_service.run_sequential(
-                    [{"scope": "appids", "appids": need_ingest, "kind": "humble_backfill"}]
-                )
-            except Exception:  # noqa: BLE001
-                # 任务占用等登记失败不阻塞本轮入库——下轮刷新重试
-                logger.info("[humble-bundles] %s 首爬登记跳过：%d 款", bundle.slug, len(need_ingest))
 
     now = get_beijing_time_obj().replace(tzinfo=None)
     async with write_gate(WritePriority.BACKGROUND, label="humble_sync"), get_session_factory()() as s:
@@ -315,6 +370,12 @@ async def _sync_bundle_detail(
             await s.execute(
                 update(HumbleBundle).where(HumbleBundle.slug == bundle.slug)
                 .values(price_cny_fen=detail["price_cny_fen"])
+            )
+        if detail.get("tiers"):
+            # 档位有结果才覆盖：页面结构变动解析为空时保留旧档不清空
+            await s.execute(
+                update(HumbleBundle).where(HumbleBundle.slug == bundle.slug)
+                .values(tiers_json=json.dumps(detail["tiers"], ensure_ascii=False))
             )
         if mark_updated:
             await s.execute(
@@ -413,10 +474,14 @@ async def refresh_humble_bundles() -> dict:
             for bundle in stale[:24]:
                 done.append(await _sync_bundle_detail(session, proxy, bundle, mark_updated=True))
         unresolved_total = sum(len(d.get("unresolved") or []) for d in done)
-        logger.info("[humble-bundles] 刷新完成：列表 %d 包，详情 %d 包（未解析 %d）",
-                    len(rows), len(done), unresolved_total)
+        # 刷新收敛后跑一轮收录扫描（0.2.2）：本轮新解析出的未入目录 appid
+        # 连同历史欠账一起批量登记首爬——收录链独立于详情抓取，抓取失败时
+        # 也能单独续跑（调度器另有每日一拍）
+        ingest = await scan_missing_ingest()
+        logger.info("[humble-bundles] 刷新完成：列表 %d 包，详情 %d 包（未解析 %d，收录 %d）",
+                    len(rows), len(done), unresolved_total, ingest.get("queued", 0))
         return {"ok": True, "listed": len(rows), "details": done,
-                "unresolvedTotal": unresolved_total}
+                "unresolvedTotal": unresolved_total, "ingest": ingest}
 
 
 async def start_refresh() -> dict:
@@ -426,6 +491,61 @@ async def start_refresh() -> dict:
         return {"ok": True, "started": False, "running": True}
     _refresh_task = asyncio.create_task(refresh_humble_bundles())
     return {"ok": True, "started": True, "running": True}
+
+
+# 单轮批量首爬上限：防极端候选（页面塞了几百条目）打爆队列，余额下拍续跑
+_INGEST_BATCH = 200
+
+
+async def _queue_ingest(appids: list[int], source: str) -> int:
+    """批量登记一次性首爬（scope=appids，与月包补价同管线）。
+
+    占用（409）等失败静默留痕：候选判定是 games 行存在性，下拍天然重试。"""
+    ids = sorted(set(appids))[:_INGEST_BATCH]
+    if not ids:
+        return 0
+    try:
+        from app.domains.crawl import service as crawl_service
+
+        await crawl_service.run_sequential(
+            [{"scope": "appids", "appids": ids, "kind": "humble_backfill"}]
+        )
+    except Exception:  # noqa: BLE001
+        logger.info("[humble-ingest] %s 首爬登记跳过（%d 款留待下拍）", source, len(ids))
+        return 0
+    logger.info("[humble-ingest] %s 登记首爬 %d 款", source, len(ids))
+    return len(ids)
+
+
+async def scan_missing_ingest() -> dict:
+    """收录扫描（0.2.2 专用逻辑）：在售包内已解析 appid、但 Steam 目录
+    还没有行的游戏 → 批量登记首爬收录。
+
+    与详情抓取解耦：刷新链尾跑一轮，调度器另有每日独立一拍——抓取失败/
+    跳过的那几天，收录欠账照常补。幂等账本 = games 行存在（首爬成功建
+    行即退出候选；行存在但价格未出也不重复爬，价格轮自己管）。"""
+    from app.domains.games.models import Game
+
+    async with get_session_factory()() as s:
+        candidates = (
+            await s.execute(
+                select(HumbleBundleGame.appid)
+                .join(HumbleBundle, HumbleBundle.slug == HumbleBundleGame.slug)
+                .where(HumbleBundle.on_sale.is_(True), HumbleBundleGame.appid.is_not(None))
+                .distinct()
+            )
+        ).scalars().all()
+        appids = [int(a) for a in candidates]
+        have: set[int] = set()
+        if appids:
+            have = {
+                r[0] for r in await s.execute(
+                    select(Game.appid).where(Game.appid.in_(appids))
+                )
+            }
+    missing = [a for a in appids if a not in have]
+    queued = await _queue_ingest(missing, "scan")
+    return {"ok": True, "candidates": len(missing), "queued": queued}
 
 
 async def list_bundles() -> dict:
@@ -509,13 +629,42 @@ async def bundle_detail(slug: str) -> dict | None:
         for a, title in rows
         if a is None or int(a) not in have
     ]
+    # 档位（0.2.2）：存的是每档「本档新增」；这里展开成售卖语义——
+    # 每档带累计计数与本档新增游戏（title→appid 由条目表回挂）。
+    # 旧数据 tiers_json NULL → 空数组，前端回退平铺。
+    title_appid: dict[str, int | None] = {}
+    for a, title in rows:
+        title_appid.setdefault(title, int(a) if a is not None else None)
+    tiers_out: list[dict] = []
+    if bundle.tiers_json:
+        try:
+            raw_tiers = json.loads(bundle.tiers_json)
+        except (ValueError, TypeError):
+            raw_tiers = []
+        seen: set[str] = set()
+        for idx, t in enumerate(raw_tiers if isinstance(raw_tiers, list) else []):
+            if not isinstance(t, dict):
+                continue
+            news = [
+                {"title": x, "appid": title_appid.get(x)}
+                for x in (t.get("titles") or [])
+                if isinstance(x, str) and x not in seen and not seen.add(x)
+            ]
+            tiers_out.append({
+                "id": str(t.get("id") or f"t{idx}"),
+                "priceCnyFen": t.get("price_cny_fen"),
+                "isInitial": bool(t.get("is_initial")),
+                "newGames": news,
+                "newCount": len(news),
+                "count": len(seen),  # 累计：买这档一共拿多少款
+            })
     payload: dict = {
         "slug": bundle.slug, "name": bundle.name, "image": bundle.image, "url": bundle.url,
         "priceCnyFen": bundle.price_cny_fen,
         "startAt": bundle.start_at.isoformat() if bundle.start_at else None,
         "endAt": bundle.end_at.isoformat() if bundle.end_at else None,
         "gameCount": len(rows),
-        "items": [], "total": 0, "pending": pending,
+        "items": [], "total": 0, "pending": pending, "tiers": tiers_out,
     }
     if appids:
         cards = await games_service.list_items_by_appids(appids)

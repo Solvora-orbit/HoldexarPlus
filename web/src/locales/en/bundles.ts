@@ -21,7 +21,6 @@ const bundles: Partial<Record<MessageKey, string>> = {
   'bundleshub.history.refreshing': 'Fetching months…',
   'bundleshub.history.window': 'Fetch window',
   'bundleshub.history.windowOpt': '{n} months',
-  'bundleshub.history.windowHint': 'incl. current, up to {max} (2 years)',
   'bundleshub.history.started': 'Fetch started — records will appear when it completes',
   'bundleshub.history.done': 'History fetch complete',
 
@@ -40,6 +39,9 @@ const bundles: Partial<Record<MessageKey, string>> = {
   'bundles.humble.collapse': 'Collapse list',
   'bundles.humble.resolving': 'matching',
   'bundles.humble.ingesting': 'ingesting',
+  'bundles.humble.tier': 'Tier {i}',
+  'bundles.humble.tierMeta': '{n} games total · {m} added here',
+  'bundles.humble.tierEmpty': 'No extra games at this tier',
   'bundles.humble.detailEmpty': 'Games in this bundle are not resolved yet — the crawler fills them in over the next runs.',
 
   /* Steam bundles panel (components/business/SteamBundlesPanel.vue, 0.2.0) */
