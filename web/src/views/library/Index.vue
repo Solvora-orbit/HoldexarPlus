@@ -520,6 +520,48 @@ onMounted(() => {
   load(true)
 })
 
+// ─── 网格 ↔ 列表切换保持浏览位置 ───
+// 两种模式的滚动容器不同（网格 = .view-container 整页滚，列表 = HlScrollList
+// 内滚区），直接切会落到各自容器的记忆位置（列表容器刚重建时是 0，观感就是
+// 「从头开始」）。切走前记下视口顶部第一张卡的 appid，新容器渲染完成后滚回
+// 同一张卡——两种模式行高不同，只保证「同一游戏回到视口顶部」的精度。
+// 注：网格入场有 v-stagger 级联动效，测量可能带上几像素的过渡位移，可忽略。
+function topVisibleAppid(container: HTMLElement | null): number | null {
+  if (!container) return null
+  const cTop = container.getBoundingClientRect().top
+  const cards = container.querySelectorAll<HTMLElement>('[data-lib-card]')
+  for (const card of cards) {
+    if (card.getBoundingClientRect().bottom > cTop) return Number(card.dataset.libCard)
+  }
+  return null
+}
+
+watch(
+  () => store.layoutMode,
+  async (mode, oldMode) => {
+    if (mode === oldMode) return
+    const oldContainer =
+      oldMode === 'list'
+        ? document.querySelector<HTMLElement>('.hl-scroll-list')
+        : document.querySelector<HTMLElement>('.view-container')
+    const anchor = topVisibleAppid(oldContainer)
+    await nextTick()
+    if (anchor == null) return
+    const newContainer =
+      mode === 'list'
+        ? document.querySelector<HTMLElement>('.hl-scroll-list')
+        : document.querySelector<HTMLElement>('.view-container')
+    if (!newContainer) return
+    const cTop = newContainer.getBoundingClientRect().top
+    for (const card of newContainer.querySelectorAll<HTMLElement>('[data-lib-card]')) {
+      if (Number(card.dataset.libCard) === anchor) {
+        newContainer.scrollTop += card.getBoundingClientRect().top - cTop
+        break
+      }
+    }
+  },
+)
+
 /* keep-alive 常驻（往返游戏详情不丢列表、筛选与滚动）：网格模式的滚动容器是
    App 层的 .view-container（全局一份），切走即被后续页面改写，离开前记录、
    切回后还原；列表模式的滚动在 HlScrollList 内部，实例保留即自动保留。 */
@@ -720,6 +762,7 @@ onBeforeUnmount(() => {
         <template #item="{ item }">
           <div
             class="lib-item-wrap"
+            :data-lib-card="item.appid"
             :class="{ 'is-managed': manageMode, 'is-selected': manageMode && selected.has(item.appid) }"
             @click.capture="toggleSelect(item.appid, $event)"
           >
@@ -761,6 +804,7 @@ onBeforeUnmount(() => {
           v-for="game in items"
           :key="game.appid"
           class="lib-item-wrap"
+          :data-lib-card="game.appid"
           :class="{ 'is-managed': manageMode, 'is-selected': manageMode && selected.has(game.appid) }"
           @click.capture="toggleSelect(game.appid, $event)"
         >

@@ -14,7 +14,11 @@
 .navbar {
     position: sticky;
     top: 0;
-    z-index: 9;
+    /* 必须高于 .filter-toolbar（20，地区子工具栏）：排序/地区下拉菜单是
+       navbar 的层叠上下文（z:9）的子级，navbar 低于工具栏时菜单一打开就
+       被吸顶工具栏盖住（「智能排序被遮挡」的根因）；仍低于 HlDrawer 遮罩
+       （100），模态抽屉打开时由抽屉接管全屏 */
+    z-index: 25;
     background: var(--surface-overlay-panel);
     backdrop-filter: blur(10px);
     padding: 12px 20px;

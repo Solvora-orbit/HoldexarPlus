@@ -21,7 +21,8 @@ const library = {
   'library.board.empty': '榜单为空：还没拉到榜单，或新面孔尚未入目录。去「任务」页跑一轮抓取后回来。',
   'library.board.gotoCrawl': '去任务页抓取',
   'library.board.loadMore': '加载更多',
-  'library.board.backToList': '返回找游戏列表',
+  'library.board.back': '返回上一页',
+  'library.board.onlyDiscounted': '仅折中',
 
   /* 加载失败（错误消息来自后端，作为参数传入） */
   'library.error.title': '暂时无法加载游戏',

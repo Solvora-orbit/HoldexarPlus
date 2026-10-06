@@ -20,7 +20,8 @@ const library: Partial<Record<MessageKey, string>> = {
   'library.board.empty': 'The board is empty: nothing fetched yet, or the new faces have not entered the catalog. Run a crawl on the Tasks page and come back.',
   'library.board.gotoCrawl': 'Go to Tasks',
   'library.board.loadMore': 'Load more',
-  'library.board.backToList': 'Back to the game list',
+  'library.board.back': 'Back',
+  'library.board.onlyDiscounted': 'On discount only',
 
   'library.error.title': 'Could not load the library',
   'library.error.network': 'Cannot reach the server',
