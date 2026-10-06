@@ -7,6 +7,7 @@ const bundles: Partial<Record<MessageKey, string>> = {
   'bundleshub.desc': 'Multi-site bundle hub: bundle games map to your Steam library — click a card for regional prices.',
   'bundleshub.source.hbMonthly': 'HB Choice',
   'bundleshub.source.hbBundles': 'HB Bundles',
+  'bundleshub.source.steamBundles': 'Steam Bundles',
   'bundleshub.source.fanatical': 'Fanatical',
   'bundleshub.source.greenman': 'Green Man Gaming',
   'bundleshub.source.soon': 'Soon',
@@ -20,6 +21,28 @@ const bundles: Partial<Record<MessageKey, string>> = {
   'bundleshub.history.refreshing': 'Fetching history…',
   'bundleshub.history.started': 'Fetch started — records will appear when it completes',
   'bundleshub.history.done': 'History fetch complete',
+
+  /* HB bundles panel (components/business/HumbleBundlesPanel.vue, 0.2.0) */
+  'bundles.humble.desc':
+    'Humble Bundle store bundles (fetched daily). Open a card to see its games; click a game card to compare regional prices.',
+  'bundles.humble.refresh': 'Refresh bundles',
+  'bundles.humble.refreshStarted': 'Refresh started — the list updates when it completes',
+  'bundles.humble.refreshDone': 'HB bundles refreshed',
+  'bundles.humble.empty': 'No HB bundle data yet: hit "Refresh bundles" (takes a minute or two).',
+  'bundles.humble.gameCount': '{n} matched',
+  'bundles.humble.ending': '{d}d left',
+  'bundles.humble.official': 'Store page',
+  'bundles.humble.detailEmpty': 'Games in this bundle are not resolved yet — the crawler fills them in over the next runs.',
+
+  /* Steam bundles panel (components/business/SteamBundlesPanel.vue, 0.2.0) */
+  'bundles.steam.desc': 'Imported Steam bundles / subs. Open one to see CN and lowest-region converted prices per game.',
+  'bundles.steam.empty': 'No Steam bundles imported yet — add one with the "Import" button above.',
+  'bundles.steam.gameCount': '{n} games',
+  'bundles.steam.official': 'Steam page',
+  'bundles.steam.detailEmpty': 'No game data in this bundle yet — try again later.',
+  'bundles.steam.appidFallback': 'AppID {id}',
+  'bundles.steam.cnPrice': 'CN',
+  'bundles.steam.lowest': 'Lowest',
 
   /* Drawer completion bar */
   'bundles.status.owned': '✅ You already own everything',

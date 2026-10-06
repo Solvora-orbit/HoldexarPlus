@@ -1,0 +1,29 @@
+"""HB 捆绑包域路由：在售包列表 / 单包详情（包内游戏比价）/ 手动刷新。"""
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException
+
+from app.domains.humble import service
+
+router = APIRouter(prefix="/humble", tags=["humble"])
+
+
+@router.get("/bundles")
+async def bundles() -> dict:
+    """在售 HB 捆绑包列表（纯本地读，零外网；running 供前端轮询刷新进度）。"""
+    return await service.list_bundles()
+
+
+@router.get("/bundles/{slug}")
+async def bundle_detail(slug: str) -> dict:
+    """单包详情 + 包内游戏条目（/games 同款卡片载荷）。未知 slug 404。"""
+    payload = await service.bundle_detail(slug)
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"未知捆绑包: {slug}")
+    return payload
+
+
+@router.post("/refresh")
+async def refresh() -> dict:
+    """后台启动一轮列表+详情刷新（立即返回；每日调度同入口，幂等）。"""
+    return await service.start_refresh()

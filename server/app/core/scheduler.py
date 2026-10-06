@@ -1221,6 +1221,60 @@ async def _job_bartervg_catchup() -> None:
         logger.exception("[调度] Barter.vg 启动补跑异常（不阻塞启动）")
 
 
+async def _job_hb_history_catchup() -> None:
+    """启动补跑（0.2.0）：HB 月包近一年历史。打包版更新当天 06:40 定点可能
+    已经错过，月包视图只有种子带的旧几期——启动窗口 120s 后补跑一轮
+    （refresh_hb_history 按 KV 月份记账幂等：已记账的期零联网直跳过，
+    重启风暴无代价；fetch.hb_choice 开关关闭时静默让位）。"""
+    try:
+        await asyncio.sleep(120)
+        from app.domains.metadata import service as metadata_service
+
+        if not await content_fetch_enabled("fetch.hb_choice"):
+            return
+        result = await metadata_service.refresh_hb_history()
+        fresh = [m for m in result.get("months", []) if not m.get("skipped")]
+        if fresh:
+            logger.info("[调度] HB 历史启动补跑：%d 期处理（新标 %d 款）",
+                        len(fresh), result.get("markedTotal", 0))
+    except Exception:  # noqa: BLE001
+        logger.exception("[调度] HB 历史启动补跑异常（不阻塞启动）")
+
+
+async def _job_humble_bundles() -> None:
+    """HB 商店捆绑包刷新（每日 06:55，月包 06:40 之后错峰）：列表 + 在售包
+    详情 + 包内游戏 appid 关联（域内按「新包/超 24h」自动限定，幂等）。"""
+    if not await content_fetch_enabled("fetch.humble_bundles"):
+        return  # 「HB 捆绑包」开关关闭：定时停转，已有数据保留展示
+    from app.domains.humble import service as humble_service
+
+    try:
+        result = await humble_service.refresh_humble_bundles()
+        if result.get("ok"):
+            logger.info(
+                "[调度] HB 捆绑包刷新：列表 %d 包 / 详情 %d 包（未解析 %d）",
+                result.get("listed", 0), len(result.get("details") or []),
+                result.get("unresolvedTotal", 0),
+            )
+        else:
+            logger.warning("[调度] HB 捆绑包刷新未完成：%s", result.get("error"))
+    except Exception:  # noqa: BLE001
+        logger.exception("[调度] HB 捆绑包刷新异常（次日自动重试）")
+
+
+async def _job_humble_catchup() -> None:
+    """启动补跑（0.2.0）：HB 捆绑包。新装/长期停机等不到 06:55 定点——
+    启动窗口 180s 后补跑一轮（域内「新包/超 24h」判定天然幂等，重启风暴
+    无代价；fetch.humble_bundles 开关关闭时静默让位）。"""
+    try:
+        await asyncio.sleep(180)
+        if not await content_fetch_enabled("fetch.humble_bundles"):
+            return
+        await _job_humble_bundles()
+    except Exception:  # noqa: BLE001
+        logger.exception("[调度] HB 捆绑包启动补跑异常（不阻塞启动）")
+
+
 async def _job_coming_soon_retry() -> None:
     """COMING_SOON 重探层（每日 10:00，限量 20 个）：
 
@@ -1447,6 +1501,8 @@ def start_scheduler() -> None:
     # 限时赠送复查：到期（或 1h 内到期）的 promo 重爬翻转状态；通常 0 候选
     scheduler.add_job(_job_free_promo_retry, "interval", hours=6, id="free_promo_retry")
     scheduler.add_job(_job_hb_choice, "cron", hour=6, minute=40, id="hb_choice")
+    # HB 商店捆绑包：列表+在售详情+包内关联，每日 06:55（月包 06:40 错峰）
+    scheduler.add_job(_job_humble_bundles, "cron", hour=6, minute=55, id="humble_bundles")
     scheduler.add_job(_job_epic_free, "cron", hour=7, minute=10, id="epic_free")
     # Steam 活动日历：官方文档页低频变更，每日一拍足够；05:00 避开已占分钟
     scheduler.add_job(
@@ -1484,6 +1540,15 @@ def start_scheduler() -> None:
         asyncio.create_task(_job_bartervg_catchup())
     except RuntimeError:
         logger.warning("[调度] 无运行中事件循环，跳过 Barter.vg 启动补跑")
+    # HB 月包历史 / HB 捆绑包启动补跑（120s / 180s，各自幂等闸内静默跳过）
+    try:
+        asyncio.create_task(_job_hb_history_catchup())
+    except RuntimeError:
+        logger.warning("[调度] 无运行中事件循环，跳过 HB 历史启动补跑")
+    try:
+        asyncio.create_task(_job_humble_catchup())
+    except RuntimeError:
+        logger.warning("[调度] 无运行中事件循环，跳过 HB 捆绑包启动补跑")
     logger.info("调度器已启动（账户同步 15min / 池价格爬取锚点网格：Steam 折扣刷新锚 北京 01:00[夏令时]/02:00[冬令时] + 6h 步进[目录层与特惠榜差值段随开关] / 外部时间判定 DST / 捆绑包关注集刷新随价格链 / 失败记录修复 5min 空闲档 / 汇率每日 03:00 + 历史修复每日 04:00[缺口·空闲·Key·配额四重门禁] / WAL 收缩每日 04:30 / Barter.vg bundle 计数每日 05:40 / 代理体检 6h / Clash 订阅重拉 30min 拍[6h 门槛·爬虫空闲档] / 钱包每分钟轮转 / 账单 30min / 热销榜 1h / 热门新品 24h / 即将推出 24h / CS 重探每日 10:00 / 自动备份 24h）")
 
 

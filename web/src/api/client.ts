@@ -1489,6 +1489,42 @@ export interface BundleImportResult {
   appsSkippedNonGame?: number
 }
 
+// ─── humble（HB 商店捆绑包：列表 + 包内游戏比价，0.2.0）──────────────
+
+export interface HumbleBundleItem {
+  slug: string
+  name: string
+  image: string
+  url: string
+  /** 包价（人民币分；preset_prices 最低档）；null = 未解析 */
+  priceCnyFen: number | null
+  /** 截止 ISO（null = 长期在售） */
+  endAt: string | null
+  onSale: boolean
+  gameCount: number
+}
+
+export interface HumbleBundlesPayload {
+  /** 刷新后台任务进行中（前端轮询） */
+  running: boolean
+  bundles: HumbleBundleItem[]
+}
+
+export interface HumbleBundleDetailPayload extends HumbleBundleItem {
+  items: GameListItem[]
+  total: number
+}
+
+export const humbleApi = {
+  /** 在售 HB 捆绑包列表（纯本地读，零外网） */
+  bundles: () => request<HumbleBundlesPayload>('GET', '/humble/bundles'),
+  /** 单包详情：包信息 + 包内游戏（/games 同款卡片载荷） */
+  bundleDetail: (slug: string) =>
+    request<HumbleBundleDetailPayload>('GET', `/humble/bundles/${encodeURIComponent(slug)}`),
+  /** 启动一轮刷新（后台任务立即返回；running 轮询 bundles 端点） */
+  refresh: () => request<{ ok: boolean; started: boolean; running: boolean }>('POST', '/humble/refresh'),
+}
+
 // ─── watch pool（监控池：账户绑定 + 池条目。后端仍走 wishlist 域端点）─────
 
 export interface TrackedAccount {

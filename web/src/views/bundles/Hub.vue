@@ -18,6 +18,8 @@ import { bundlesApi, metadataApi, type GameListItem, type HbHistoryMonth } from 
 import { useRegionsStore } from '@/stores/regions'
 import { useI18n, type MessageKey } from '@/locales'
 import HlGameCard from '@/components/business/HlGameCard.vue'
+import HumbleBundlesPanel from '@/components/business/HumbleBundlesPanel.vue'
+import SteamBundlesPanel from '@/components/business/SteamBundlesPanel.vue'
 import HlBacktop from '@/components/ui/HlBacktop.vue'
 import HlButton from '@/components/ui/HlButton.vue'
 import HlDialog from '@/components/ui/HlDialog.vue'
@@ -27,12 +29,13 @@ import HlInput from '@/components/ui/HlInput.vue'
 import HlSpinner from '@/components/ui/HlSpinner.vue'
 import { message } from '@/components/ui'
 
-type SourceKey = 'hb-monthly' | 'hb-bundles' | 'fanatical' | 'greenman'
+type SourceKey = 'hb-monthly' | 'hb-bundles' | 'steam-bundles' | 'fanatical' | 'greenman'
 
 /** 站源注册表：soon=true 的只渲染禁用态占位，接入时改成 false 并挂面板 */
 const SOURCES: { key: SourceKey; labelKey: MessageKey; soon?: boolean }[] = [
   { key: 'hb-monthly', labelKey: 'bundleshub.source.hbMonthly' },
-  { key: 'hb-bundles', labelKey: 'bundleshub.source.hbBundles', soon: true },
+  { key: 'hb-bundles', labelKey: 'bundleshub.source.hbBundles' },
+  { key: 'steam-bundles', labelKey: 'bundleshub.source.steamBundles' },
   { key: 'fanatical', labelKey: 'bundleshub.source.fanatical', soon: true },
   { key: 'greenman', labelKey: 'bundleshub.source.greenman', soon: true },
 ]
@@ -83,10 +86,19 @@ async function loadMonths() {
       selectedMonth.value = res.months[0]?.label ?? ''
       if (selectedMonth.value) void loadMonthGames()
     }
+    // 进包记录不足一年且没有任务在跑：自动补抓一轮（0.2.0；打包版更新
+    // 当天错过 06:40 定点时免干等到次日。后端按 KV 月份记账幂等 + 重入
+    // 锁，本页每个实例只触发一次；调度器的启动补跑是更上游的双保险）
+    if (!res.running && !autoBackfillTried && res.months.length < 12) {
+      autoBackfillTried = true
+      void refreshHistory()
+    }
   } finally {
     monthsLoading.value = false
   }
 }
+
+let autoBackfillTried = false
 
 async function loadMonthGames() {
   if (!selectedMonth.value) return
@@ -278,6 +290,12 @@ const monthCountLabel = computed(() =>
         </div>
       </template>
     </template>
+
+    <!-- HB 捆绑包面板（Humble Bundle 商店包：包卡 + 抽屉游戏卡比价） -->
+    <HumbleBundlesPanel v-else-if="activeSource === 'hb-bundles'" />
+
+    <!-- Steam 捆绑包展示区（已导入的 bundle/sub；导入入口保留在页头） -->
+    <SteamBundlesPanel v-else-if="activeSource === 'steam-bundles'" />
 
     <!-- 未接入站源：诚实占位 -->
     <HlEmpty v-else icon="" style="--pane-pad: 48px 24px">

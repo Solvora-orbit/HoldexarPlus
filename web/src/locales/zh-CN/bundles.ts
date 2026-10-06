@@ -23,6 +23,7 @@ const bundles = {
   'bundleshub.desc': '多站捆绑包中心：包内游戏对应 Steam 库，点击卡片直接看各区价格。',
   'bundleshub.source.hbMonthly': 'HB 月包',
   'bundleshub.source.hbBundles': 'HB 捆绑包',
+  'bundleshub.source.steamBundles': 'Steam 捆绑包',
   'bundleshub.source.fanatical': 'Fanatical',
   'bundleshub.source.greenman': '绿巨人 GMG',
   'bundleshub.source.soon': '待接入',
@@ -36,6 +37,28 @@ const bundles = {
   'bundleshub.history.refreshing': '正在补抓历史…',
   'bundleshub.history.started': '已开始补抓，完成后记录会自动出现',
   'bundleshub.history.done': '历史补抓完成',
+
+  /* ── HB 捆绑包面板（components/business/HumbleBundlesPanel.vue，0.2.0）── */
+  'bundles.humble.desc':
+    'Humble Bundle 商店在售捆绑包（每日自动抓取）。点开包卡查看包内游戏，点击游戏卡即可对比各区价格。',
+  'bundles.humble.refresh': '刷新捆绑包',
+  'bundles.humble.refreshStarted': '已开始刷新，完成后自动更新列表',
+  'bundles.humble.refreshDone': 'HB 捆绑包已刷新',
+  'bundles.humble.empty': '还没有 HB 捆绑包数据：点「刷新捆绑包」抓一轮（约一两分钟）。',
+  'bundles.humble.gameCount': '{n} 款已收录',
+  'bundles.humble.ending': '剩 {d} 天',
+  'bundles.humble.official': '官方页',
+  'bundles.humble.detailEmpty': '包内游戏尚未解析完成（后台抓取会逐轮补齐），稍后再来查看。',
+
+  /* ── Steam 捆绑包面板（components/business/SteamBundlesPanel.vue，0.2.0）── */
+  'bundles.steam.desc': '已导入的 Steam 捆绑包 / Sub。点开查看包内各游戏的国区价与全区最低折算价。',
+  'bundles.steam.empty': '还没有导入过 Steam 捆绑包：用右上角「导入」添加。',
+  'bundles.steam.gameCount': '{n} 款',
+  'bundles.steam.official': 'Steam 商店页',
+  'bundles.steam.detailEmpty': '这个包还没有取到包内游戏数据，稍后再试。',
+  'bundles.steam.appidFallback': 'AppID {id}',
+  'bundles.steam.cnPrice': '国区',
+  'bundles.steam.lowest': '最低',
 
   /* 抽屉「补齐状态」栏（statusBar computed；completable/unknown 复用 mps.*） */
   'bundles.status.owned': '✅ 已拥有全部内容',

@@ -29,6 +29,7 @@ from app.domains.games.router import router as games_router
 from app.domains.metadata.router import router as metadata_router
 from app.domains.monitoring.router import router as monitoring_router
 from app.domains.notifications.router import router as notifications_router
+from app.domains.humble.router import router as humble_router
 from app.domains.pilot.router import router as pilot_router
 from app.domains.proxies.router import router as proxies_router
 from app.domains.proxypool.router import router as proxypool_router
@@ -468,6 +469,7 @@ def create_app() -> FastAPI:
     app.include_router(games_router, prefix="/api/v1")
     app.include_router(achievements_router, prefix="/api/v1")
     app.include_router(metadata_router, prefix="/api/v1")
+    app.include_router(humble_router, prefix="/api/v1")
     app.include_router(monitoring_router, prefix="/api/v1")
     app.include_router(notifications_router, prefix="/api/v1")
     app.include_router(pilot_router, prefix="/api/v1")
