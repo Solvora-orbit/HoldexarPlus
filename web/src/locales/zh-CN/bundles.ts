@@ -19,6 +19,24 @@
    gameTag.* 值**带前导空格**（拼在游戏名之后：`名字 [已拥有]`），不是笔误。 */
 
 const bundles = {
+  /* ── 捆绑包中心（views/bundles/Hub.vue，plus.3）── */
+  'bundleshub.desc': '多站捆绑包中心：包内游戏对应 Steam 库，点击卡片直接看各区价格。',
+  'bundleshub.source.hbMonthly': 'HB 月包',
+  'bundleshub.source.hbBundles': 'HB 捆绑包',
+  'bundleshub.source.fanatical': 'Fanatical',
+  'bundleshub.source.greenman': '绿巨人 GMG',
+  'bundleshub.source.soon': '待接入',
+  'bundleshub.record.title': '进包记录（近一年）',
+  'bundleshub.monthCount': '本盘 {n} 款',
+  'bundleshub.empty': '还没有进包记录：先补抓近一年历史，或等当月包打标后回来。',
+  'bundleshub.soon.desc': '该站源还在路上：中心已预留接入位，后续版本开放。',
+  'bundleshub.import.title': '导入 Steam 捆绑包',
+  'bundleshub.import.placeholder': 'https://store.steampowered.com/bundle/…',
+  'bundleshub.history.refresh': '补抓近一年',
+  'bundleshub.history.refreshing': '正在补抓历史…',
+  'bundleshub.history.started': '已开始补抓，完成后记录会自动出现',
+  'bundleshub.history.done': '历史补抓完成',
+
   /* 抽屉「补齐状态」栏（statusBar computed；completable/unknown 复用 mps.*） */
   'bundles.status.owned': '✅ 已拥有全部内容',
   'bundles.status.family': '✅ 家庭组已拥有全套',

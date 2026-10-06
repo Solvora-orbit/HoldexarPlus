@@ -12,6 +12,7 @@
 """
 import html
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -221,6 +222,9 @@ async def _seed():
         await session.execute(
             delete(AppSetting).where(AppSetting.key == TEST_STATE_KEY)
         )
+        await session.execute(
+            delete(AppSetting).where(AppSetting.key == HISTORY_STATE_KEY)
+        )
         await session.commit()
 
 def datetime_now():
@@ -372,3 +376,114 @@ async def test_backfill_hb_prices_trigger(monkeypatch):
     res2 = await hb.backfill_hb_prices()
     assert res2["pending"] == 0 and res2["started"] is False
     assert len(calls) == 1
+
+
+# ─── plus.3：多月解析 / 导入合并 / 往期补抓 / 进包记录 ─────────────
+
+
+HISTORY_STATE_KEY = "hb_history_months_test"
+
+
+def test_fmt_hb_data_multi_month():
+    """多月源值全量解析（此前只取首个匹配，其余月份丢失）。"""
+    raw = "Humble Choice (Sep 2025), Humble Choice (Mar 2026), Humble Choice (Sep 2025)"
+    assert hb._fmt_hb_data(raw) == "HB慈善包25年9月包, HB慈善包26年3月包"
+    assert hb._fmt_hb_data("Humble Choice (Aug 2026)") == "HB慈善包26年8月包"
+    assert hb._fmt_hb_data("") == "HB慈善包"
+
+
+def test_merge_hb_data_union_and_generic_dedup():
+    # 已有月份在前、导入补在后、跨源去重
+    assert hb._merge_hb_data(
+        "HB慈善包25年9月包", "HB慈善包26年3月包, HB慈善包25年9月包"
+    ) == "HB慈善包25年9月包, HB慈善包26年3月包"
+    # 有了带月份的标签，无月份的通用标记即冗余
+    assert hb._merge_hb_data("HB慈善包", "HB慈善包26年1月包") == "HB慈善包26年1月包"
+    # 只剩通用标记时保留（宁标通用形态不错过打标）
+    assert hb._merge_hb_data("HB慈善包", "HB慈善包") == "HB慈善包"
+
+
+@pytest.mark.asyncio
+async def test_import_hb_merges_instead_of_overwrite(tmp_path):
+    """外部史低库导入改合并语义：库里已有月份（当月包/历史补抓写的）不被冲掉。"""
+    src = tmp_path / "steam_historical_lows.db"
+    con = sqlite3.connect(str(src))
+    con.execute("CREATE TABLE game_lows (appid INTEGER, humble_choice TEXT)")
+    con.execute(
+        "INSERT INTO game_lows VALUES (?, ?)",
+        (APP_EXISTING, "Humble Choice (Dec 2025), Humble Choice (Jan 2026)"),
+    )
+    con.commit()
+    con.close()
+
+    res = await hb.import_hb(str(tmp_path))
+    assert res["ok"] is True and res["updated"] >= 1
+    async with get_session_factory()() as session:
+        row = await session.get(Game, APP_EXISTING)
+        assert row.hb_data == f"{OLD_LABEL}, HB慈善包25年12月包, HB慈善包26年1月包"
+
+
+def _past_month_html() -> str:
+    """合成往期月包页：只有条目块，无 activeContentMachineName 等当月字段。"""
+    items = {
+        "frosttest2": _item("Frosttest 2", ["steam"]),
+        "keytest": _item("Keytest", ["steam"]),
+        "missinggame": _item("Missing Game", ["steam"]),
+    }
+    blocks = [
+        f'"{name}": {json.dumps(obj, ensure_ascii=False)}' for name, obj in items.items()
+    ]
+    blob = html.escape(", ".join(blocks))
+    return f"<html><div data-json=\"{blob}\"></div></html>"
+
+
+@pytest.mark.asyncio
+async def test_refresh_hb_history_marks_and_records(monkeypatch):
+    """往期补抓：月份从 URL 推导打标；全量解析才记账；记账后幂等跳过。"""
+    monkeypatch.setattr(hb, "_HB_HISTORY_KEY", HISTORY_STATE_KEY)
+    monkeypatch.setattr(hb, "asyncio", _NoSleep)
+
+    async def fake_fetch(session, proxy, url):
+        return _past_month_html()
+
+    async def fake_resolve(session, title, proxy):
+        return APP_UNRESOLVED if title == "Missing Game" else _RESOLVE_MAP[title]
+
+    monkeypatch.setattr(hb, "_fetch_past_month_page", fake_fetch)
+    monkeypatch.setattr(hb, "_resolve_appid", fake_resolve)
+
+    specs = hb._past_month_specs(1)
+    res = await hb.refresh_hb_history(1)
+    assert res["ok"] is True
+    assert res["months"][0]["machine"] == specs[0]["machine"]
+    assert res["months"][0]["marked"] == 3
+    assert res["months"][0].get("unresolved") is None  # 全解析 → 记账
+
+    second = await hb.refresh_hb_history(1)
+    assert second["months"][0]["skipped"] is True
+
+    async with get_session_factory()() as session:
+        row = await session.get(Game, APP_NEW)
+        assert row is not None and row.is_hb is True
+        assert row.hb_data == specs[0]["label"]
+
+
+@pytest.mark.asyncio
+async def test_hb_history_months_and_month_items():
+    """进包记录：月份清单聚合 + 指定期条目（/games 同构）。"""
+    async with get_session_factory()() as session:
+        session.add(
+            Game(appid=APP_NEW, name="Frosttest 2", is_hb=True,
+                 hb_data=f"{LABEL}, {OLD_LABEL}", created_at=datetime_now())
+        )
+        await session.commit()
+
+    res = await hb.hb_history()
+    labels = {m["label"] for m in res["months"]}
+    assert LABEL in labels and OLD_LABEL in labels
+    counts = {m["label"]: m["count"] for m in res["months"]}
+    assert counts[LABEL] >= 1 and counts[OLD_LABEL] >= 1
+
+    per = await hb.hb_history(LABEL)
+    assert per["month"] == LABEL and per["total"] >= 1
+    assert APP_NEW in {g["appid"] for g in per["items"]}

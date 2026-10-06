@@ -170,12 +170,38 @@ def _collect_xgp_with_links(data: dict, links_map: dict[str, dict[str, str]]) ->
 # ─── 三个导入器 ─────────────────────────────────────────────────
 
 def _fmt_hb_data(raw: str) -> str:
-    m = _HB_RE.search(raw or "")
-    if m:
+    """源字段 → 进包月份标签（逗号拼接，保源序去重）。
+
+    一款游戏可能进过多期月包：源值里每个「Humble Choice (Mon YYYY)」都要
+    解出来——此前只取首个匹配，其余月份整段丢失（plus.3 修复）。"""
+    labels: list[str] = []
+    for m in _HB_RE.finditer(raw or ""):
         month_num = _MONTH_MAP.get(m.group(1).capitalize()[:3], "1")
         year_short = m.group(2)[-2:]
-        return f"HB慈善包{year_short}年{month_num}月包"
-    return "HB慈善包"
+        label = f"HB慈善包{year_short}年{month_num}月包"
+        if label not in labels:
+            labels.append(label)
+    return ", ".join(labels) if labels else "HB慈善包"
+
+
+_GENERIC_HB_LABEL = "HB慈善包"
+
+
+def _merge_hb_data(existing: str, incoming: str) -> str:
+    """进包月份合并（并集保序）：已记录月份在前，新导入补在后。
+
+    带月份的标签出现后，无月份的通用标记即冗余（只剩它一个时才保留——
+    宁标通用形态不错过打标）。import_hb 据此合并而非整段覆盖，
+    否则每轮导入都会抹掉 refresh_hb_choice / 历史补抓写下的月份。"""
+    months: list[str] = []
+    for part in (existing, incoming):
+        for label in (part or "").split(","):
+            label = label.strip()
+            if label and label not in months:
+                months.append(label)
+    if len(months) > 1 and _GENERIC_HB_LABEL in months:
+        months.remove(_GENERIC_HB_LABEL)
+    return ", ".join(months) if months else _GENERIC_HB_LABEL
 
 
 async def import_epic(source_dir: str | None = None) -> dict:
@@ -272,11 +298,14 @@ async def import_hb(source_dir: str | None = None) -> dict:
     updated = 0
     async with write_gate(WritePriority.BACKGROUND, label="metadata_batch"), get_session_factory()() as session:
         rows = (
-            await session.execute(select(Game.appid).where(Game.appid.in_(list(hb_map))))
+            await session.execute(
+                select(Game.appid, Game.hb_data).where(Game.appid.in_(list(hb_map)))
+            )
         ).all()
-        existing_ids = [r[0] for r in rows]
+        # 合并而非覆盖：库里已有的月份（当月包刷新/历史补抓写的）不能被导入冲掉
+        values = {r[0]: _merge_hb_data(r[1] or "", hb_map[r[0]]) for r in rows}
+        existing_ids = list(values)
         if existing_ids:
-            values = {aid: hb_map[aid] for aid in existing_ids}
             await session.execute(
                 update(Game)
                 .where(Game.appid.in_(existing_ids))
@@ -289,7 +318,8 @@ async def import_hb(source_dir: str | None = None) -> dict:
 
 # ─── HB 当月包：membership 页 → 游戏侧标记（无账本表）─────────────
 # 月包的持久语义只有「哪些游戏进过哪个月的包」，落 games.is_hb/hb_data 即完备；
-# 整包存档属易失数据（往期页对未登录 404），表化只会诱导依赖一份注定不全的存档。
+# 历史深度由往期页逐月补抓补足（见下方 hb-history 段），表化整包存档只会
+# 诱导依赖一份注定不全的存档。
 
 _MEMBERSHIP_URL = "https://www.humblebundle.com/membership"
 _STORESEARCH_URL = "https://store.steampowered.com/api/storesearch"
@@ -566,6 +596,173 @@ async def refresh_hb_choice() -> dict:
         "productName": parsed["productName"], "label": label,
         "marked": marked, "unresolved": unresolved, "recorded": True,
     }
+
+
+# ─── HB 月包历史：往期 membership 页逐月补抓（plus.3）─────────────
+# 往期页（/membership/<Month>-<Year>）未登录同样可读（仅缺
+# activeContentMachineName 等当月字段），条目结构与当月页一致，月份从
+# URL 推导。逐月抓取 → storesearch 解析 appid → 打标；KV 按 machine
+# 月份记账，幂等可重跑（整月有未解析条目不记账，下次补抓续跑）。
+
+_MONTH_NAMES = {
+    1: "January", 2: "February", 3: "March", 4: "April",
+    5: "May", 6: "June", 7: "July", 8: "August",
+    9: "September", 10: "October", 11: "November", 12: "December",
+}
+_PAST_MONTH_URL = "https://www.humblebundle.com/membership/{slug}"
+_HB_HISTORY_KEY = "hb_history_months"
+_HB_HISTORY_WINDOW = 12
+
+_history_lock = asyncio.Lock()
+_history_task: asyncio.Task | None = None
+
+
+def _past_month_specs(months_back: int = _HB_HISTORY_WINDOW) -> list[dict]:
+    """从上个月起往回数 months_back 期的抓取清单（machine/label/url）。"""
+    from app.crawler.utils import get_beijing_time_obj
+
+    now = get_beijing_time_obj()
+    specs: list[dict] = []
+    for offset in range(1, months_back + 1):
+        total = now.year * 12 + now.month - 1 - offset
+        year, month = divmod(total, 12)
+        month += 1
+        name = _MONTH_NAMES[month]
+        machine = f"{name.lower()}_{year}"
+        specs.append({
+            "machine": machine,
+            "label": _choice_month_label(machine, None),
+            "url": _PAST_MONTH_URL.format(slug=f"{name}-{year}"),
+        })
+    return specs
+
+
+async def _fetch_past_month_page(
+    session: aiohttp.ClientSession, proxy: str | None, url: str
+) -> str | None:
+    try:
+        async with session.get(
+            url,
+            headers=_hb_headers(),
+            proxy=proxy,
+            timeout=aiohttp.ClientTimeout(total=_CHOICE_TIMEOUT),
+        ) as resp:
+            if resp.status != 200:
+                return None
+            return await resp.text(errors="replace")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def refresh_hb_history(months_back: int = _HB_HISTORY_WINDOW) -> dict:
+    """逐月补抓往期 HB Choice → games.is_hb/hb_data（每日调度与手动触发同入口）。
+
+    当月不在补抓范围（refresh_hb_choice 负责）；幂等判据：KV 按月份 machine
+    记账，已记账月份跳过。空月也记账（避免每天重打同一张空页）。"""
+    from app.domains.settings.service import get_value, set_value
+
+    if _history_lock.locked():
+        return {"source": "hb-history", "ok": False, "error": "已有历史补抓在进行"}
+    async with _history_lock:
+        proxy = await _strategy_proxy()
+        connector = aiohttp.TCPConnector(limit=4, ttl_dns_cache=60)
+        done: dict = await get_value(_HB_HISTORY_KEY) or {}
+        months: list[dict] = []
+        async with aiohttp.ClientSession(connector=connector) as session:
+            for spec in _past_month_specs(months_back):
+                machine = spec["machine"]
+                if done.get(machine):
+                    months.append({"machine": machine, "label": spec["label"], "skipped": True})
+                    continue
+                page = await _fetch_past_month_page(session, proxy, spec["url"])
+                if not page:
+                    months.append({"machine": machine, "label": spec["label"], "ok": False, "error": "页面抓取失败"})
+                    continue
+                parsed = _parse_choice_page(page)
+                steam_items = {
+                    name: item
+                    for name, item in (parsed["items"] or {}).items()
+                    if "steam" in (item.get("delivery_methods") or [])
+                }
+                if not steam_items:
+                    done[machine] = {"label": spec["label"], "marked": 0}
+                    months.append({"machine": machine, "label": spec["label"], "marked": 0})
+                    continue
+                marked: list[int] = []
+                unresolved: list[str] = []
+                for name, item in steam_items.items():
+                    title = str(item.get("title") or "")
+                    appid = await _resolve_appid(session, title, proxy)
+                    if appid is None:
+                        unresolved.append(title)
+                    else:
+                        await _mark_game_hb(appid, title, spec["label"])
+                        marked.append(appid)
+                    await asyncio.sleep(0.3)
+                if unresolved:
+                    logger.warning(
+                        "[hb-history] %s 有 %d 条未解析，不记账（下次补抓重试）",
+                        machine, len(unresolved),
+                    )
+                    months.append({
+                        "machine": machine, "label": spec["label"],
+                        "marked": len(marked), "unresolved": unresolved,
+                    })
+                    continue
+                done[machine] = {"label": spec["label"], "marked": len(marked)}
+                months.append({"machine": machine, "label": spec["label"], "marked": len(marked)})
+        await set_value(_HB_HISTORY_KEY, done)
+        marked_total = sum(int(m.get("marked") or 0) for m in months)
+        logger.info("[hb-history] 历史补抓完成：本期新标 %d 款 / %d 期", marked_total, len(months))
+        return {"source": "hb-history", "ok": True, "months": months, "markedTotal": marked_total}
+
+
+async def start_hb_history_refresh() -> dict:
+    """后台启动历史补抓（HTTP 立即返回：整轮要抓 12 页 + 逐条 storesearch，
+    约一两分钟，不能占着请求；进度看 hb_history() 的 running）。"""
+    global _history_task
+    if _history_task is not None and not _history_task.done():
+        return {"source": "hb-history", "ok": True, "started": False, "running": True}
+    _history_task = asyncio.create_task(refresh_hb_history())
+    return {"source": "hb-history", "ok": True, "started": True, "running": True}
+
+
+def _hb_month_sort_key(label: str) -> tuple[int, int]:
+    m = re.match(r"HB慈善包(\d{2})年(\d{1,2})月包", label)
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
+async def hb_history(month: str | None = None) -> dict:
+    """进包记录（近一年）：月份清单或指定期游戏条目（纯本地读，零外网）。
+
+    进包是历史事实，条目不套「国区在售」可见性门槛（锁区/暂无价格行的
+    款也在记录里）；游戏条目复用 /games 的 _build_list_item，前端
+    HlGameCard 直接渲染。"""
+    from app.domains.games import service as games_service
+
+    async with get_session_factory()() as session:
+        rows = (
+            await session.execute(
+                select(Game.appid, Game.hb_data).where(Game.is_hb.is_(True))
+            )
+        ).all()
+    months: dict[str, list[int]] = {}
+    for appid, hb_data in rows:
+        for label in (hb_data or "").split(","):
+            label = label.strip()
+            if label:
+                months.setdefault(label, []).append(int(appid))
+    ordered = sorted(months, key=_hb_month_sort_key, reverse=True)
+    running = _history_task is not None and not _history_task.done()
+    if not month:
+        return {
+            "running": running,
+            "months": [{"label": lb, "count": len(months[lb])} for lb in ordered[:_HB_HISTORY_WINDOW]],
+        }
+    payload: dict = {"running": running, "month": month, "items": [], "total": 0}
+    if month in months:
+        payload.update(await games_service.list_items_by_appids(months[month]))
+    return payload
 
 
 # ─── HB 当月包展示：仪表盘卡片数据源（纯本地库读，零外网）─────────────

@@ -32,6 +32,13 @@ const dashboard = {
   'dashboard.stats.discounts': '当前打折',
   'dashboard.stats.monitored': '游戏监控',
 
+  /* 捆绑包中心轻入口卡（完整 HB 卡在 /bundles 中心，plus.3） */
+  'dashboard.section.bundles': '捆绑包',
+  'dashboard.bundles.entryTitle': '捆绑包中心',
+  'dashboard.bundles.entry': '查看',
+  'dashboard.bundles.entrySummary': '当月 {label} 已入库 {n} 款，近一年进包记录在中心页',
+  'dashboard.bundles.entryEmpty': '多站捆绑包与进包记录，点此查看',
+
   /* 空库首屏：只回答「第一步做什么」 */
   'dashboard.welcome.title': '欢迎来到 {app}',
   'dashboard.welcome.ask': '你想监控哪些游戏？',

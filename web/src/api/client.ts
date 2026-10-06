@@ -2705,6 +2705,16 @@ export const metadataApi = {
     request<EpicOffersPayload>('GET', '/metadata/epic/offers', undefined, opts),
   /** 当月 HB Choice 游戏清单（纯本地库读，零外网；ok=false = 尚未入库） */
   hbChoiceOffers: () => request<HbChoiceOffersPayload>('GET', '/metadata/hb/offers'),
+  /** 进包记录（近一年）：月份清单 + 历史补抓运行态（捆绑包中心数据源） */
+  hbHistory: () => request<HbHistoryPayload>('GET', '/metadata/hb/history'),
+  /** 指定期的进包记录（/games 同构条目，HlGameCard 直接渲染） */
+  hbHistoryMonth: (month: string) =>
+    request<HbHistoryMonthPayload>('GET', `/metadata/hb/history${toQuery({ month })}`),
+  /** 逐月补抓往期月包（后台任务，立即返回；进度轮询 hbHistory 的 running） */
+  refreshHbHistory: () =>
+    request<{ ok: boolean; started: boolean; running: boolean }>(
+      'POST', '/metadata/hb/history/refresh',
+    ),
   /** 正在赠送中的 Steam 限时免费（纯本地库读；offers 空 = 无赠送，模块整块隐藏） */
   steamFreeOffers: () => request<SteamFreeOffersPayload>('GET', '/metadata/steam/offers'),
 }
@@ -2756,6 +2766,26 @@ export interface HbChoiceOffersPayload {
   games: HbChoiceGame[]
   /** ok=false 时的原因文案 */
   error?: string
+}
+
+export interface HbHistoryMonth {
+  /** 进包月份标签（games.hb_data 约定，如 "HB慈善包26年9月包"） */
+  label: string
+  count: number
+}
+
+export interface HbHistoryPayload {
+  /** 往期补抓后台任务进行中（前端据此轮询） */
+  running: boolean
+  /** 近一年窗口内的月份，新→旧 */
+  months: HbHistoryMonth[]
+}
+
+export interface HbHistoryMonthPayload {
+  running: boolean
+  month: string
+  items: GameListItem[]
+  total: number
 }
 
 // ─── 成就殿堂（奖杯）────────────────────────────────────

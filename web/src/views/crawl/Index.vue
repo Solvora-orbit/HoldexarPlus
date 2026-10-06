@@ -8,7 +8,6 @@ import {
   type RedeemResultItem,
   type TrackedAccount,
 } from '@/api/client'
-import { bundlesApi } from '@/api/client'
 import { useCrawlStatusStore } from '@/stores/crawlStatus'
 import { useSettingsStore } from '@/stores/settings'
 import { flagUrl } from '@/api/regions'
@@ -89,29 +88,6 @@ async function saveOwnedRegions() {
     message.error(e instanceof Error ? e.message : String(e))
   } finally {
     savingOwned.value = false
-  }
-}
-
-// ── 捆绑包导入（Steam 链接识别入库，包内 appid 自动进爬取队列）──
-const importText = ref('')
-const importing = ref(false)
-const importMsg = ref('')
-
-async function doImportBundle() {
-  const text = importText.value.trim()
-  if (!text || importing.value) return
-  importing.value = true
-  importMsg.value = ''
-  try {
-    const r = await bundlesApi.importBundle(text)
-    const name = r.name || `#${r.bundleId}`
-    importMsg.value = t(r.existed ? 'crawl.bundle.refreshed' : 'crawl.bundle.imported', { name })
-    importText.value = ''
-    await loadJobs()
-  } catch (e) {
-    importMsg.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    importing.value = false
   }
 }
 
@@ -685,26 +661,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- 捆绑包导入 -->
-    <div class="card section-card" data-section="crawl.section.bundleImport">
-      <div class="section-title">{{ t('crawl.section.bundleImport') }}</div>
-      <div class="section-desc">
-        {{ t('crawl.bundle.desc') }}
-      </div>
-      <div class="start-row">
-        <HlInput
-          v-model="importText"
-          class="bundle-import__input"
-          placeholder="https://store.steampowered.com/bundle/…"
-          @keydown.enter="doImportBundle"
-        />
-        <HlButton art="outline" size="sm" :disabled="importing" :loading="importing" @click="doImportBundle">
-          <HlIcon v-if="!importing" name="download" />
-          {{ importing ? t('crawl.import.importing') : t('crawl.bundle.import') }}
-        </HlButton>
-      </div>
-      <div v-if="importMsg" class="bundle-import__msg">{{ importMsg }}</div>
-    </div>
+    <!-- （捆绑包导入已并入「捆绑包中心」/bundles，plus.3；后端 /bundles/import 不变） -->
 
     <!-- 批量导入监控池 -->
     <div class="card section-card" data-section="crawl.section.bulkImport">
@@ -993,10 +950,6 @@ onBeforeUnmount(() => {
 
 .start-row__appids {
   width: 260px;
-}
-
-.bundle-import__input {
-  width: 320px;
 }
 
 .batch-import__input {

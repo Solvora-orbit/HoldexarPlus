@@ -34,7 +34,7 @@ import { useRatesStore } from '@/stores/rates'
 import RegionFlag from '@/components/RegionFlag.vue'
 import CurrencyFlag from '@/components/CurrencyFlag.vue'
 import EpicFreeCards from '@/components/business/EpicFreeCards.vue'
-import HbChoiceCards from '@/components/business/HbChoiceCards.vue'
+import BundlesEntryCard from '@/components/business/BundlesEntryCard.vue'
 import SteamEventCountdown from '@/components/business/SteamEventCountdown.vue'
 import SteamFreeCards from '@/components/business/SteamFreeCards.vue'
 
@@ -466,8 +466,8 @@ onMounted(() => {
     <!-- Steam 喜加一卡片组（正在赠送中的限时免费；无赠送时整块隐藏） -->
     <SteamFreeCards />
 
-    <!-- HB 当月包卡片（Humble Choice 本月内容，点击进站内详情，头部官方页直达） -->
-    <HbChoiceCards />
+    <!-- 捆绑包中心轻入口（完整 HB 当月包卡移入 /bundles 中心，防仪表盘臃肿） -->
+    <BundlesEntryCard />
 
     <!-- 主体区域（库为空时整块不渲染：新史低/降价动态/汇率都还没有可看的东西） -->
     <div v-if="!isEmptyLibrary" class="dashboard-main">

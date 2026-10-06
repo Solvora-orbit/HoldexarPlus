@@ -845,6 +845,43 @@ async def _list_games_board(
     }
 
 
+async def list_items_by_appids(appids: list[int]) -> dict:
+    """按 appid 白名单出列表条目（捆绑包中心 HB 月包/进包记录用，plus.3）。
+
+    条目形状与 /games 完全一致（_build_list_item 同一实现），前端
+    HlGameCard 直接渲染。进包记录是历史事实：不套「国区在售」可见性
+    门槛——锁区/暂无价格行的款也要出现在记录里（cn 行 LEFT JOIN，缺价留空）。"""
+    ids = list(dict.fromkeys(int(a) for a in appids if a))[:1000]
+    if not ids:
+        return {"items": [], "total": 0}
+    g = Game
+    cn = aliased(GameCurrentPrice)
+    async with get_session_factory()() as session:
+        rows = (
+            await session.execute(
+                select(g, cn)
+                .join(
+                    cn,
+                    and_(cn.appid == g.appid, cn.region_code == "CN", cn.price_status == "ok"),
+                    isouter=True,
+                )
+                .where(g.appid.in_(ids))
+                .order_by(asc(g.name))
+            )
+        ).all()
+    async with get_session_factory()() as session:
+        price_rows = await _load_page_prices(session, [r[0].appid for r in rows])
+    try:
+        regions_expected = [r.upper() for r in await effective_regions(None)]
+    except ValueError:
+        regions_expected = []
+    items = [
+        _build_list_item(game, cn_row, price_rows.get(game.appid, []), regions_expected)
+        for game, cn_row in rows
+    ]
+    return {"items": items, "total": len(items)}
+
+
 async def names_for(appids: list[int]) -> dict[int, str]:
     """批量取游戏名（领航台关注清单等只读投影用）。"""
     ids = [int(a) for a in appids if a]

@@ -3,6 +3,24 @@
 import type { MessageKey } from '../zh-CN'
 
 const bundles: Partial<Record<MessageKey, string>> = {
+  /* Bundle hub (views/bundles/Hub.vue, plus.3) */
+  'bundleshub.desc': 'Multi-site bundle hub: bundle games map to your Steam library — click a card for regional prices.',
+  'bundleshub.source.hbMonthly': 'HB Choice',
+  'bundleshub.source.hbBundles': 'HB Bundles',
+  'bundleshub.source.fanatical': 'Fanatical',
+  'bundleshub.source.greenman': 'Green Man Gaming',
+  'bundleshub.source.soon': 'Soon',
+  'bundleshub.record.title': 'Bundle history (past year)',
+  'bundleshub.monthCount': '{n} in this month',
+  'bundleshub.empty': 'No bundle records yet: fetch the past year first, or come back after the current month is marked.',
+  'bundleshub.soon.desc': 'This source is on the way: the hub already reserves a slot for it.',
+  'bundleshub.import.title': 'Import a Steam bundle',
+  'bundleshub.import.placeholder': 'https://store.steampowered.com/bundle/…',
+  'bundleshub.history.refresh': 'Fetch the past year',
+  'bundleshub.history.refreshing': 'Fetching history…',
+  'bundleshub.history.started': 'Fetch started — records will appear when it completes',
+  'bundleshub.history.done': 'History fetch complete',
+
   /* Drawer completion bar */
   'bundles.status.owned': '✅ You already own everything',
   'bundles.status.family': '✅ Your family library covers it all',

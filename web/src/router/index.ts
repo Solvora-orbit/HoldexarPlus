@@ -59,8 +59,10 @@ const router = createRouter({
     // 旧愿望单页 URL（书签/外链）重定向到监控池，避免掉进 404 兜底
     { path: '/wishlist', redirect: '/pool' },
     {
+      // 捆绑包中心（plus.3，多站源 + HB 月包进包记录）；旧 Steam 捆绑包
+      // 浏览视图保留在 views/bundles/Index.vue，脱离路由备回归
       path: '/bundles',
-      component: () => import('@/views/bundles/Index.vue'),
+      component: () => import('@/views/bundles/Hub.vue'),
       meta: titleKey('nav.bundles'),
     },
     {

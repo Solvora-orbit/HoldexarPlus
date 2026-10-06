@@ -1085,8 +1085,9 @@ async def _job_backup_catchup() -> None:
 
 async def _job_hb_choice() -> None:
     """当月 HB Choice 游戏侧标记（每日幂等：membership 页 machine_name
-    未变即跳过，新月包出现才解析+打标；无登录态拿不到往期页，错过
-    当月即漏，因此按日检查而非按月）+ 已标记未取价补首爬。"""
+    未变即跳过，新月包出现才解析+打标，因此按日检查而非按月）
+    + 往期月包逐月补抓（plus.3：往期页未登录可读，KV 按月记账幂等）
+    + 已标记未取价补首爬。"""
     if not await content_fetch_enabled("fetch.hb_choice"):
         return  # 「Humble Choice」开关关闭：当月包核对停转，已有标记保留
     from app.domains.metadata import service as metadata_service
@@ -1112,6 +1113,19 @@ async def _job_hb_choice() -> None:
             logger.exception("[调度] HB 当月包邮件发送失败")
     except Exception:  # noqa: BLE001
         logger.exception("[调度] HB 当月包标记异常（次日自动重试）")
+    # 往期月包历史补抓（近一年）：已记账月份直接跳过，通常一轮几十秒内结束；
+    # 整月有未解析条目不记账，次日续跑（plus.3）
+    try:
+        history = await metadata_service.refresh_hb_history()
+        if history.get("ok"):
+            fresh = [m for m in history.get("months", []) if not m.get("skipped")]
+            if fresh:
+                logger.info("[调度] HB 历史补抓：%d 期处理（新标 %d 款）",
+                            len(fresh), history.get("markedTotal", 0))
+        else:
+            logger.warning("[调度] HB 历史补抓未完成：%s", history)
+    except Exception:  # noqa: BLE001
+        logger.exception("[调度] HB 历史补抓异常（次日自动重试）")
     # 已标记未取价的 HB 游戏补首爬（标记 ≠ 取价；打标失败不挡补价）。
     # 撞锁/池未就绪由链式层跳过留日志，次日重试；走爬取通道，auto_price
     # 关闭时与 comingsoon/free_promo 重试层一并停转。

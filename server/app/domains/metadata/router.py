@@ -47,6 +47,20 @@ async def hb_choice_offers() -> dict:
     return await service.hb_choice_offers()
 
 
+@router.get("/hb/history")
+async def hb_history(month: str | None = None) -> dict:
+    """进包记录（近一年，plus.3）：不给 month 返回月份清单（label/count/running），
+    给 month 返回该期游戏条目（/games 同构，前端 HlGameCard 直接渲染）。"""
+    return await service.hb_history(month)
+
+
+@router.post("/hb/history/refresh")
+async def refresh_hb_history() -> dict:
+    """逐月补抓往期 HB 月包（后台任务，立即返回；进度看 /hb/history 的 running）。
+    每日调度同入口，KV 按月记账幂等，可重复触发。"""
+    return await service.start_hb_history_refresh()
+
+
 @router.get("/steam/offers")
 async def steam_free_offers() -> dict:
     """正在赠送中的 Steam 限时免费清单（仪表盘卡片数据源，纯本地库零外网）。"""
