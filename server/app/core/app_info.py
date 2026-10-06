@@ -19,7 +19,7 @@ APP_SLUG = "holdexar"
 # run.py、desktop/main.py 需要在装依赖之前就能取到版本号。
 # fork 版本方案：0.1.1-plus.N——semver 预发布段按 N 递增可比，基线 0.1.1-plus.1
 # 严格大于原版 0.1.0 系（0.1.1 > 0.1.0），此后每次对外发布递增 plus.N。
-APP_VERSION = "0.1.1-plus.2"
+APP_VERSION = "0.1.1-plus.3"
 
 # 发布仓库（owner/repo）：应用内自更新清单、发布脚本（release/publish/build_manifest）
 # 与 /info 展示的唯一来源。HoldexarPlus fork 基线：只认本仓库的发布——原作者发新版
