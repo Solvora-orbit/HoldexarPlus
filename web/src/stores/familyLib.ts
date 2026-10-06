@@ -124,6 +124,17 @@ export const useFamilyStore = defineStore('familyLib', () => {
     // （各 tab 组件只写自己那份），因为 family 首页的 onMounted 每次进入
     // 都会调一次 load()——不加这行，板块来回切就是一次次白等。
     if (!force && dataSteamId.value === activeSteamId.value && ready.value) return
+    // 组解析收敛（plus.3）：gamelib 家族/游玩页签不经过 family 页的选组
+    // 流程，这里补上公共步骤——组列表未就绪时先取 status 选「首个已加入
+    // 组」，再按当前组拉库；两处消费方从此同源（后端无 target 时同样
+    // 优先已加入组账号）。
+    if (!groups.value.length) {
+      try {
+        setGroups((await familyApi.status()).groups)
+      } catch {
+        /* 无绑定账号 / 未同步：按缺省（后端默认组账号）继续，错误态照常呈报 */
+      }
+    }
     const target = activeSteamId.value
     loading.value = true
     error.value = ''

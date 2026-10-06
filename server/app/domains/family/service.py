@@ -1239,10 +1239,33 @@ def _start_library_refresh(steam_id: str) -> None:
     _LIBRARY_REFRESH_TASK[steam_id] = asyncio.create_task(_bg())
 
 
+async def _default_library_sid() -> str:
+    """/family/library 无显式目标时的默认组账号（plus.3）。
+
+    此前固定主账号：主账号不在家庭组里时（主号只是比价账号，组在别的
+    绑定账号下），gamelib 家庭/游玩页签的成员计数恒为 0——而 family 页
+    自己选了「已加入组」所以显示正常，两边口径劈叉。现在优先取最近同步
+    过的已加入组（member_count>0，与 family 页「已加入组」同一判定），
+    没有任何已加入组才回落主账号。"""
+    async with get_session_factory()() as session:
+        row = (
+            await session.execute(
+                select(FamilyGroup.steamid)
+                .where(FamilyGroup.member_count > 0)
+                .order_by(FamilyGroup.updated_at.desc())
+                .limit(1)
+            )
+        ).first()
+    if row:
+        return str(row[0])
+    return await get_primary_steamid()
+
+
 async def cached_family_library(steam_id: str | None = None) -> dict:
     """家庭库快照（进程内 TTL 缓存，stale-while-revalidate）——前端 tabs 共用。
 
-    缓存按账号分键（多账号 = 多家庭组，各拉各的）；steam_id 缺省 = 主账号。
+    缓存按账号分键（多账号 = 多家庭组，各拉各的）；steam_id 缺省 =
+    最近同步的已加入组账号（见 _default_library_sid）。
     取数顺序（修复「首开等 HTTPS」——实时聚合要逐成员调 GetOwnedGames，
     代理 HTTPS 秒级起步，首开不能干等）：
     1. 内存缓存 <TTL：直接回；
@@ -1255,7 +1278,7 @@ async def cached_family_library(steam_id: str | None = None) -> dict:
     路径写缓存的话，Cookie 失效期间每个请求都要先付一次完整的失败
     HTTPS 往返才回退快照（2.1~3.3s/次）——这也是「板块切换 1-2 秒」的主因。
     """
-    sid = steam_id or await get_primary_steamid()
+    sid = steam_id or await _default_library_sid()
     now = datetime.utcnow()
     cached = _LIBRARY_CACHE.get(sid)
     if cached:
