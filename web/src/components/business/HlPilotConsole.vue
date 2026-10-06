@@ -1237,6 +1237,10 @@ function triggerFollowUp(prompt: string) {
   if (streaming.value) return
   void ask(prompt)
 }
+
+/* 供整页（views/pilot/Index.vue 的快捷方案 chips）从外部直接发起提问：
+   ask 已有可选 text 形参，这里只是把它发布为组件公开接口 */
+defineExpose({ ask })
 </script>
 
 <template>

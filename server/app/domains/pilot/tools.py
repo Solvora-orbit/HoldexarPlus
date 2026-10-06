@@ -1547,6 +1547,10 @@ def tool_step(name: str, result: dict) -> dict:
     if name in _READ_TOOLS:
         rows = result.get("rows") or []
         data: dict = {"count": len(rows)}
+        if name == "web_search" and rows:
+            # 搜索结果行随 tool 事件下发（title/snippet ≤5 条）：此前结果只在
+            # done 卡片出现且受 cards[:6] 截断，流式全程看不到搜索结果（plus.3）
+            data["rows"] = rows[:5]
         if name == "diagnose_price" and result.get("name"):
             data["name"] = result.get("name")
         return {

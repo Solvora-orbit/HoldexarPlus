@@ -145,7 +145,8 @@ function stepText(s: PilotStep): string {
   if (s.status === 'denied') return t('pilot.step.denied')
   const parts: string[] = [t(`pilot.step.${s.label}` as MessageKey)]
   if (s.status === 'empty') {
-    parts.push(t('pilot.step.empty'))
+    // 联网搜索空结果单独说人话：多半是目标站点直连被墙/需要代理（plus.3）
+    parts.push(t(s.label === 'webSearch' ? 'pilot.step.webSearchEmpty' : 'pilot.step.empty'))
   } else if (typeof s.data.count === 'number') {
     parts.push(t('pilot.step.hits', { count: s.data.count }))
   } else if (s.label === 'navigate' && s.data.target) {
@@ -189,7 +190,17 @@ function stepText(s: PilotStep): string {
           :class="`is-${s.status}`"
         >
           <span class="pilot-step__dot" aria-hidden="true"></span>
-          <span class="pilot-step__text">{{ stepText(s) }}</span>
+          <div class="pilot-step__main">
+            <span class="pilot-step__text">{{ stepText(s) }}</span>
+            <!-- 联网搜索结果行（随 tool 事件实时下发，plus.3）：
+                 结果不再等 done 卡片，流式过程中就能看到搜到了什么 -->
+            <ul v-if="s.data.rows?.length" class="pilot-step__rows">
+              <li v-for="(r, ri) in s.data.rows" :key="ri" class="pilot-step__row">
+                <span class="pilot-step__row-k">{{ r.k }}</span>
+                <span v-if="r.v" class="pilot-step__row-v">{{ r.v }}</span>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
       <div v-if="memoryText && !live" class="pchain__memory">
@@ -347,6 +358,41 @@ function stepText(s: PilotStep): string {
   line-height: 1.5;
   color: var(--text-secondary);
   text-align: left;
+}
+
+/* 步骤主体（文字 + 可选的搜索结果行列表）纵向排布 */
+.pilot-step__main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.pilot-step__rows {
+  margin: 2px 0 0;
+  padding: 6px 10px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  background: var(--surface-inset);
+}
+.pilot-step__row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.pilot-step__row-k {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.pilot-step__row-v {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 
 .pilot-step__dot {

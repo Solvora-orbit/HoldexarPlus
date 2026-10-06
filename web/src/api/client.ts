@@ -459,7 +459,14 @@ export type PilotFacts =
 export interface PilotStep {
   label: string
   status: 'ok' | 'empty' | 'denied' | 'running'
-  data: { count?: number; name?: string | null; target?: string; path?: string }
+  data: {
+    count?: number
+    name?: string | null
+    target?: string
+    path?: string
+    /** web_search 随事件下发的结果行（title/snippet，≤5 条，plus.3） */
+    rows?: { k: string; v: string }[]
+  }
 }
 
 /** agent 循环的一步（阶段）：该步的思考、前言正文与工具步骤同属一条记录 */

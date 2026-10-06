@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 
-import { useI18n } from '@/locales'
+import { useI18n, type MessageKey } from '@/locales'
 import HlButton from '@/components/ui/HlButton.vue'
 import HlPilotConsole from '@/components/business/HlPilotConsole.vue'
 import HlPilotCards from '@/components/business/HlPilotCards.vue'
@@ -18,6 +18,23 @@ const { t } = useI18n()
 const pilotStore = usePilotStore()
 
 const galleryOpen = ref(false)
+
+// ─── 快捷方案（plus.3）：点选即以该提示词发起一轮问答 ───
+// 组合用户最常问的差价/推荐类问题，降低「不知道能问什么」的门槛；
+// 流式进行中 console.ask 内部直接忽略（no-op），无需在此防抖
+const consoleRef = ref<InstanceType<typeof HlPilotConsole> | null>(null)
+
+const SCHEMES: MessageKey[] = [
+  'pilot.scheme.diffTop',
+  'pilot.scheme.excludeOwned',
+  'pilot.scheme.poolDigest',
+  'pilot.scheme.regionCheap',
+  'pilot.scheme.wishlistSoon',
+]
+
+function runScheme(key: MessageKey) {
+  consoleRef.value?.ask(t(key))
+}
 
 const galleryCards: PilotFacts[] = [
   {
@@ -121,8 +138,22 @@ const galleryThink = computed(() => t('pilot.gallery.thinkDemo'))
 
     <div class="pilot-page__main">
       <div class="pilot-page__console">
-        <HlPilotConsole :game="pilotStore.game" page />
+        <HlPilotConsole ref="consoleRef" :game="pilotStore.game" page />
       </div>
+
+      <!-- 快捷方案：一键发起常问的差价/推荐类问答（plus.3） -->
+      <section class="pilot-schemes">
+        <span class="pilot-schemes__title">{{ t('pilot.scheme.title') }}</span>
+        <div class="pilot-schemes__chips">
+          <button
+            v-for="k in SCHEMES"
+            :key="k"
+            type="button"
+            class="pilot-schemes__chip"
+            @click="runScheme(k)"
+          >{{ t(k) }}</button>
+        </div>
+      </section>
 
       <section class="pilot-page__gallery">
         <header class="pilot-gallery__head">
@@ -149,6 +180,41 @@ const galleryThink = computed(() => t('pilot.gallery.thinkDemo'))
 </template>
 
 <style scoped>
+/* 快捷方案（点选即发送的提示词 chips）：贴在控制台正下方，首屏即见 */
+.pilot-schemes {
+  margin-top: 12px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pilot-schemes__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.pilot-schemes__chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pilot-schemes__chip {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-soft);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12.5px;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+.pilot-schemes__chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-a10);
+}
+
 .pilot-page {
   display: flex;
   align-items: flex-start;
