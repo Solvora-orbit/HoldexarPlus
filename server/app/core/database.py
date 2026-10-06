@@ -237,6 +237,8 @@ _TABLE_EXTRA_COLUMNS: dict[str, dict[str, str]] = {    "games": {
     # CURRENT_TIMESTAMP 这类非常量默认值，DDL 只能是裸 DATETIME）。
     "humble_bundles": {
         "acked_at": "DATETIME",
+        # 价格档位 JSON（0.2.2）：NULL = 未解析过，API 侧回退无档位展示
+        "tiers_json": "TEXT",
     },
     # 价格周期的阶段时刻与生产统计（统计口径见 crawl/stats.py）：
     # 统计列全为 NULL = 本轮没留下统计（未收敛 / 进程中断）
