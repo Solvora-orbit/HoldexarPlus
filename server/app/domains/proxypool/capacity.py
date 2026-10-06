@@ -28,6 +28,7 @@ from typing import Mapping, Sequence
 import httpx
 import yaml
 
+from app.core.platform import NO_WINDOW_FLAGS
 from app.domains.proxies.clash_manager import ClashRuntime, kernel_version
 from app.domains.proxypool.health import EXIT_IP_TARGET_URL
 from app.domains.proxypool.pool import POOL_FILENAME
@@ -400,6 +401,7 @@ def _machine_info() -> dict:
         out = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq mihomo.exe", "/FO", "CSV", "/NH"],
             capture_output=True, text=True, timeout=15,
+            creationflags=NO_WINDOW_FLAGS,
         ).stdout or ""
         count = sum(1 for line in out.splitlines() if "mihomo" in line.lower())
         info["concurrent_mihomo_processes"] = count

@@ -29,6 +29,7 @@ import yaml
 
 from app.core.app_info import APP_SLUG
 from app.core.config import get_settings
+from app.core.platform import NO_WINDOW_FLAGS
 from app.domains.proxies.kernel_release import (
     GEO_ASSETS,
     MIHOMO_VERSION,
@@ -511,7 +512,7 @@ def kernel_version(exe_path: Path) -> str | None:
     try:
         result = subprocess.run(
             [str(exe_path), "-v"], capture_output=True, timeout=10,
-            encoding="utf-8", errors="replace",
+            encoding="utf-8", errors="replace", creationflags=NO_WINDOW_FLAGS,
         )
         first = (result.stdout or result.stderr).splitlines()
         return first[0] if first else None
@@ -577,7 +578,7 @@ def validate_config(exe_path: str, config_path: str, work_dir: Path) -> None:
         result = subprocess.run(
             [exe_path, "-t", "-f", config_path, "-d", str(work_dir)],
             capture_output=True, timeout=CONFIG_TEST_TIMEOUT,
-            encoding="utf-8", errors="replace",
+            encoding="utf-8", errors="replace", creationflags=NO_WINDOW_FLAGS,
         )
     except subprocess.TimeoutExpired:
         logger.warning("内核配置校验超时（geo 下载可能在进行），放行启动")
@@ -843,6 +844,7 @@ class ClashRuntime:
         out = subprocess.run(
             ["powershell", "-NoProfile", "-Command", ps_script],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20,
+            creationflags=NO_WINDOW_FLAGS,
         ).stdout or ""
         current = self.process.pid if self.process else -1
         killed = 0
@@ -852,6 +854,7 @@ class ClashRuntime:
                 subprocess.run(
                     ["taskkill", "/F", "/PID", pid],
                     capture_output=True, timeout=10,
+                    creationflags=NO_WINDOW_FLAGS,
                 )
                 killed += 1
         if killed:
@@ -923,6 +926,7 @@ class ClashRuntime:
              "-ext-ctl", controller_addr, "-secret", self.secret],
             stdout=log_file,
             stderr=subprocess.STDOUT,
+            creationflags=NO_WINDOW_FLAGS,
         )
         log_file.close()
         logger.info(
