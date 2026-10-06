@@ -6,7 +6,7 @@
 
 **本地 Steam 多区价格监控终端** —— Holdexar 独立分支 · 持续演进版
 
-[![Version](https://img.shields.io/badge/version-v0.2.0-orange)](../../releases)
+[![Version](https://img.shields.io/badge/version-v0.2.1-orange)](../../releases)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13%2B-blue?logo=python&logoColor=white)](https://www.python.org)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Vue 3](https://img.shields.io/badge/Frontend-Vue%203-42b883?logo=vuedotjs&logoColor=white)](https://vuejs.org)
@@ -44,6 +44,7 @@
 - **v0.1.1-plus.2**（2026-10-06）：偏好持久化修复（主题不再跳回默认）· 榜单视图上线 · 游戏库补抓无价格 + 数据自动同步 · 返回键来源感知 · Steam 账号管理收敛至设置页
 - **v0.1.1-plus.3**（2026-10-07）：捆绑包中心（HB 月包 + 近一年进包记录 + 多站源预留）· HB 历史逐月补抓 · 降价动态独立子页 · 榜单筛选与竞态修复 · 统计卡跳转 · 游戏库家庭成员计数修复 · 网络页防闪控制台 · 图标重绘 H+ PLUS · 侧栏指示条增强
 - **v0.2.0**（2026-10-07）：**转正式发布**。HB 捆绑包上线（商店在售包抓取 + 包内游戏比价）· Steam 捆绑包展示区 · HB 月包近一年启动自动补抓 · 侧栏品牌 logo 高清化 · 自动抓取页居中 · 版本号转 semver（plus 开发线完结）
+- **v0.2.1**（2026-10-07）：月包抓取窗口含当月可调（默认 6 期 / 上限 2 年）· HB 捆绑包条目计数一致 + 未收录自动补爬 · 新包 NEW 角标点开已读 · 抽屉拖宽记忆 · 包卡档期与列表收放 · 关闭弹窗图标清晰化
 
 **规划中**
 
