@@ -26,6 +26,7 @@ const shell: Partial<Record<MessageKey, string>> = {
   'nav.me': 'Settings',
   'nav.about': 'About',
   'nav.toolbox': 'Toolbox',
+  'nav.priceEvents': 'Price activity',
 
   'wallet.bind': 'Bind wallet',
   'wallet.unboundTip': 'No Steam cookie bound — click to open Settings',

@@ -21,6 +21,9 @@ const dashboard: Partial<Record<MessageKey, string>> = {
   'dashboard.stats.totalGames': 'Titles in the store',
   'dashboard.stats.discounts': 'On sale now',
   'dashboard.stats.monitored': 'Monitored games',
+  'dashboard.stats.totalGamesTip': 'Browse all games (Find games)',
+  'dashboard.stats.discountsTip': 'Browse games on sale now',
+  'dashboard.stats.monitoredTip': 'Open the monitoring pool (Following)',
 
   /* Bundle hub entry card (full HB card lives in /bundles hub, plus.3) */
   'dashboard.section.bundles': 'Bundles',

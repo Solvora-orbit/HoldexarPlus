@@ -377,9 +377,17 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 统计卡片（库里有游戏后才出现） -->
+    <!-- 统计卡片（库里有游戏后才出现；可点击跳转对应清单，plus.3） -->
     <div v-if="!isEmptyLibrary" class="stat-grid" data-section="dashboard.section.overview">
-      <div class="card stat-card" v-loading="loading">
+      <div
+        class="card stat-card stat-card--link"
+        v-loading="loading"
+        role="button"
+        tabindex="0"
+        :title="t('dashboard.stats.totalGamesTip')"
+        @click="router.push('/library')"
+        @keydown.enter="router.push('/library')"
+      >
         <div class="stat-card__icon stat-card__icon--blue">
           <el-icon :size="22"><DataLine /></el-icon>
         </div>
@@ -389,7 +397,15 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="card stat-card" v-loading="loading">
+      <div
+        class="card stat-card stat-card--link"
+        v-loading="loading"
+        role="button"
+        tabindex="0"
+        :title="t('dashboard.stats.discountsTip')"
+        @click="router.push({ path: '/library', query: { discount: '1' } })"
+        @keydown.enter="router.push({ path: '/library', query: { discount: '1' } })"
+      >
         <div class="stat-card__icon stat-card__icon--green">
           <el-icon :size="22"><Discount /></el-icon>
         </div>
@@ -399,7 +415,15 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="card stat-card" v-loading="loading">
+      <div
+        class="card stat-card stat-card--link"
+        v-loading="loading"
+        role="button"
+        tabindex="0"
+        :title="t('dashboard.stats.monitoredTip')"
+        @click="router.push('/pool')"
+        @keydown.enter="router.push('/pool')"
+      >
         <div class="stat-card__icon stat-card__icon--orange">
           <el-icon :size="22"><PriceTag /></el-icon>
         </div>
@@ -534,7 +558,7 @@ onMounted(() => {
         <div v-if="cycleDigest" class="card section-card" data-section="priceEvent.cycle.title">
           <div class="section-header">
             <div class="section-title">{{ t('priceEvent.cycle.title') }}</div>
-            <HlButton variant="text" size="sm" @click="router.push('/library')">
+            <HlButton variant="text" size="sm" @click="router.push('/price-events')">
               {{ t('priceEvent.cycle.more') }} →
             </HlButton>
           </div>
@@ -582,7 +606,7 @@ onMounted(() => {
               <el-icon><Select /></el-icon>
               {{ t('dashboard.section.priceMoves') }}
             </div>
-            <HlButton variant="text" size="sm" @click="router.push('/library')">
+            <HlButton variant="text" size="sm" @click="router.push('/price-events')">
               {{ t('dashboard.action.viewAll') }} →
             </HlButton>
           </div>
@@ -717,6 +741,17 @@ onMounted(() => {
   align-items: center;
   gap: 14px;
   padding: 18px 20px;
+}
+
+/* 可点击统计卡：hover 亲和态（AGENTS 前端交互规范——可跳转的数字卡要有反馈） */
+.stat-card--link {
+  cursor: pointer;
+  transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
+}
+.stat-card--link:hover {
+  border-color: var(--accent-a50);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
 }
 
 .stat-card__icon {

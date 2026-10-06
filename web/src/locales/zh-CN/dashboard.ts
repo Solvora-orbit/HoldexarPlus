@@ -31,6 +31,9 @@ const dashboard = {
   'dashboard.stats.totalGames': '游戏商店总量',
   'dashboard.stats.discounts': '当前打折',
   'dashboard.stats.monitored': '游戏监控',
+  'dashboard.stats.totalGamesTip': '查看全部游戏（找游戏）',
+  'dashboard.stats.discountsTip': '查看当前打折的游戏',
+  'dashboard.stats.monitoredTip': '查看监控池清单（我的关注）',
 
   /* 捆绑包中心轻入口卡（完整 HB 卡在 /bundles 中心，plus.3） */
   'dashboard.section.bundles': '捆绑包',

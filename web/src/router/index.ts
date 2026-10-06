@@ -32,6 +32,12 @@ const router = createRouter({
       meta: titleKey('library.board.title'),
     },
     {
+      // 降价动态子页（plus.3）：不入侧栏导航，仪表盘「全部」入口跳转
+      path: '/price-events',
+      component: () => import('@/views/priceevents/Index.vue'),
+      meta: titleKey('nav.priceEvents'),
+    },
+    {
       path: '/pilot',
       component: () => import('@/views/pilot/Index.vue'),
       meta: titleKey('nav.pilot'),

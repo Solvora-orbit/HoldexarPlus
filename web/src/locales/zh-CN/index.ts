@@ -67,6 +67,8 @@ import achievements from './achievements'
 import achievementsCareer from './achievementsCareer'
 // ── 价格事件面（游戏详情「最近价格变化」+ 仪表盘「本轮更新」）──
 import priceEvent from './priceEvent'
+// ── 降价动态子页（views/priceevents/Index.vue，plus.3）──
+import priceevents from './priceevents'
 // ── 自动抓取页（views/fetch/Index.vue，内容源开关）──
 import fetchPage from './fetch'
 // ── 灵动岛消息面（components/ui/HlIsland.vue，与组件同构）──
@@ -118,6 +120,7 @@ export const messages = {
   ...achievements,
   ...achievementsCareer,
   ...priceEvent,
+  ...priceevents,
   ...fetchPage,
   ...island,
   ...steamEvents,
