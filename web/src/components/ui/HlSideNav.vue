@@ -18,6 +18,9 @@ export interface HlSideNavItem {
   dot?: boolean
   /** 红点的悬停说明（缺省无 tooltip） */
   dotTitle?: string
+  /** 左缘指示条色相偏移（deg，作用在 accent 上）：用户在哪一项，细条就
+   *  带一点该页的色相（plus.3）。缺省 0 = 纯 accent。 */
+  hue?: number
 }
 
 export interface HlSideNavGroup {
@@ -134,6 +137,7 @@ defineOptions({ name: 'HlSideNav' })
           type="button"
           class="hl-sb-item"
           :class="{ 'is-active': isActive(item) }"
+          :style="item.hue ? { '--sb-hue': `${item.hue}deg` } : undefined"
           :data-tour="tourAttr(item)"
           :title="collapsed ? item.label : undefined"
           @click="go(item)"

@@ -2327,7 +2327,11 @@ html:not(.dark) .hl-table th { color: var(--text-secondary); }
   height: 60%;
   border-radius: 0 3px 3px 0;
   background: var(--accent);
-  transition: transform 0.3s var(--ease-spring);
+  /* 每个导航项可带一点色相偏移（--sb-hue，条目数据下发）：用户在哪一页，
+     细条就是哪一页的色——色相来自 accent 本体，四套主题自动跟随 */
+  filter: hue-rotate(var(--sb-hue, 0deg));
+  box-shadow: 0 0 6px var(--accent-a30);
+  transition: transform 0.3s var(--ease-spring), filter 0.3s var(--ease-spring);
 }
 .hl-sb-item svg { width: 17px; height: 17px; flex-shrink: 0; opacity: 0.7; transition: opacity 0.2s; }
 .hl-sb-item:hover {
@@ -2340,7 +2344,8 @@ html:not(.dark) .hl-table th { color: var(--text-secondary); }
 .hl-sb-item:hover::before { transform: translateY(-50%) scaleY(1); }
 .hl-sb-item:hover svg { opacity: 1; }
 .hl-sb-item.is-active { color: var(--accent); font-weight: 600; background: var(--bg-soft); }
-.hl-sb-item.is-active::before { transform: translateY(-50%) scaleY(1); }
+/* 激活态小幅加长（60% → 78%）：幅度刻意压小，只做「到位」的暗示 */
+.hl-sb-item.is-active::before { transform: translateY(-50%) scaleY(1.3); }
 .hl-sb-item.is-active svg { opacity: 1; }
 .hl-sb-item__label { overflow: hidden; text-overflow: ellipsis; }
 /* 条目红点（如「我」有新版本可用）：状态提示，非计数；描边用卡片底色做隔离 */

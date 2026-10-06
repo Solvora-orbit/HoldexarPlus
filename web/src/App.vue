@@ -187,42 +187,43 @@ const logo = computed(() =>
 const navGroups = computed<HlSideNavGroup[]>(() => [
   {
     items: [
-      { label: t('nav.dashboard'), to: '/dashboard', icon: 'dashboard' },
-      { label: t('nav.library'), to: '/library', icon: 'store' },
-      { label: t('nav.pilot'), to: '/pilot', icon: 'zap' },
-      { label: t('nav.bundles'), to: '/bundles', icon: 'package' },
-      { label: t('nav.gamelib'), to: '/gamelib', icon: 'gamepad' },
-      { label: t('nav.pool'), to: '/pool', icon: 'target' },
-      { label: t('nav.alerts'), to: '/alerts', icon: 'bell' },
+      { label: t('nav.dashboard'), to: '/dashboard', icon: 'dashboard', hue: 0 },
+      { label: t('nav.library'), to: '/library', icon: 'store', hue: -20 },
+      { label: t('nav.pilot'), to: '/pilot', icon: 'zap', hue: 24 },
+      { label: t('nav.bundles'), to: '/bundles', icon: 'package', hue: 48 },
+      { label: t('nav.gamelib'), to: '/gamelib', icon: 'gamepad', hue: -44 },
+      { label: t('nav.pool'), to: '/pool', icon: 'target', hue: 14 },
+      { label: t('nav.alerts'), to: '/alerts', icon: 'bell', hue: -28 },
     ],
   },
   {
     label: t('nav.group.more'),
     items: [
-      { label: t('nav.family'), to: '/family', icon: 'home' },
-      { label: t('nav.bills'), to: '/bills', icon: 'list' },
-      { label: t('nav.events'), to: '/events', icon: 'calendar' },
-      { label: t('nav.achievements'), to: '/achievements', icon: 'trophy' },
+      { label: t('nav.family'), to: '/family', icon: 'home', hue: 20 },
+      { label: t('nav.bills'), to: '/bills', icon: 'list', hue: -36 },
+      { label: t('nav.events'), to: '/events', icon: 'calendar', hue: 40 },
+      { label: t('nav.achievements'), to: '/achievements', icon: 'trophy', hue: -12 },
     ],
   },
   {
     label: t('nav.group.system'),
     items: [
-      { label: t('nav.proxies'), to: '/proxies', icon: 'monitor' },
-      { label: t('nav.crawl'), to: '/crawl', icon: 'refresh' },
-      { label: t('nav.fetch'), to: '/fetch', icon: 'download' },
-      { label: t('nav.rates'), to: '/rates', icon: 'chart' },
-      { label: t('nav.logs'), to: '/logs', icon: 'terminal' },
+      { label: t('nav.proxies'), to: '/proxies', icon: 'monitor', hue: -24 },
+      { label: t('nav.crawl'), to: '/crawl', icon: 'refresh', hue: 28 },
+      { label: t('nav.fetch'), to: '/fetch', icon: 'download', hue: -40 },
+      { label: t('nav.rates'), to: '/rates', icon: 'chart', hue: 36 },
+      { label: t('nav.logs'), to: '/logs', icon: 'terminal', hue: -8 },
       // 「设置」= 设置页，也是更新卡片的落点：有新版本且**提示开着**时这里亮红点
       // （提示关了 = 用户要求零打扰，红点也不能留）
       {
         label: t('nav.me'),
         to: '/settings',
         icon: 'user',
+        hue: 8,
         dot: updaterStore.hasUpdate && settingsStore.updateNotify !== false,
         dotTitle: t('update.navDot'),
       },
-      { label: t('nav.about'), to: '/about', icon: 'info' },
+      { label: t('nav.about'), to: '/about', icon: 'info', hue: -28 },
     ],
   },
 ])
