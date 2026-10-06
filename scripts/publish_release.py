@@ -40,7 +40,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SERVER = ROOT / "server"
 RELEASE = ROOT / "release"
-SCOOP_JSON = RELEASE / "scoop" / "holdexar.json"
+# Scoop 清单文件名按 APP_NAME（build_release.py 产出 holdexarplus.json）；
+# plus.2 及之前误用旧名 holdexar.json 导致每次发布都「警告缺件」，根治于此
+SCOOP_JSON = RELEASE / "scoop" / "holdexarplus.json"
 NOTES_FILE = RELEASE / "RELEASE_NOTES.md"
 MANIFEST = RELEASE / "latest.json"
 # build_release.py 会把种子另存到 release/ 作为独立资产；源码树里的那份是同源副本，
@@ -158,7 +160,7 @@ def collect_artifacts(app_zip: Path) -> list[Path]:
     人工核对与 Scoop checkver 拼 URL 都靠它）：
         ① 应用包 zip   ② latest.json   ③ 资产种子 holdexar_seed.db
         ④ 公共目录库模板 holdexar_template.db（有则带）
-        ⑤ Scoop 渠道清单 release/scoop/holdexar.json（有则带）
+        ⑤ Scoop 渠道清单 release/scoop/holdexarplus.json（有则带）
     更新说明 RELEASE_NOTES.md 走 --notes-file 成为 Release 正文，不再另挂附件；
     构建中间产物（build/、work/、build*.log）不是发布物，一律不带。
     """
