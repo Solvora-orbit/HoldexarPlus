@@ -129,15 +129,53 @@ def release_is_draft(tag: str) -> bool:
         return False
 
 
+def _zip_sha256(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def pick_app_zip(version: str) -> Path:
-    """应用包：优先精确匹配当前版本，否则取 release/ 内最新。"""
+    """应用包：**只认精确匹配当前版本**的 zip（plus.3 教训：release/ 里残留
+    上一版 zip 时，模糊兜底会把它当最新传出去——错版资产直接挂上 Release）。
+
+    选中后还要过两道闸：包名必须含版本号；zip 的 sha256 必须与
+    latest.json 记录的应用包哈希一致（build_release 生成清单时写入）。
+    任何一道不过都直接终止，宁可不发也不发错。"""
     exact = RELEASE / f"{APP_NAME}-win64-v{version}.zip"
-    if exact.is_file():
-        return exact
-    candidates = sorted(RELEASE.glob(ZIP_GLOB), key=lambda p: p.stat().st_mtime)
-    if not candidates:
-        sys.exit(f"[错误] {RELEASE} 下没有应用包，先跑 scripts/build_release.py")
-    return candidates[-1]
+    if not exact.is_file():
+        sys.exit(
+            f"[错误] 找不到当前版本的应用包：{exact}\n"
+            f"先跑 scripts/build_release.py（release/ 下残留的旧版本 zip 不会被采用）"
+        )
+
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8")) if MANIFEST.is_file() else {}
+    recorded = next(
+        (
+            str(a.get("sha256") or "")
+            for a in (manifest.get("assets") or [])
+            if a.get("role") == "app"
+        ),
+        "",
+    )
+    if recorded:
+        actual = _zip_sha256(exact)
+        if actual != recorded:
+            sys.exit(
+                f"[错误] 应用包 sha256 与 latest.json 不一致，拒绝发布：\n"
+                f"  zip     : {actual}\n"
+                f"  manifest: {recorded}\n"
+                f"多半是构建后清单未刷新或 zip 被改动——重跑 build_release.py"
+            )
+    else:
+        print("[警告] latest.json 未记录 sha256，跳过哈希校验（请人工核对）")
+    if f"v{version}" not in exact.name:
+        sys.exit(f"[错误] 应用包名 {exact.name} 与版本 v{version} 不符，拒绝发布")
+    return exact
 
 
 def _with_fallback(primary: Path, fallback: Path, label: str, found: list[Path]) -> None:
