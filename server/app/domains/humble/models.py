@@ -30,7 +30,11 @@ class HumbleBundle(Base):
     start_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     end_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     on_sale: Mapped[bool] = mapped_column(Boolean, default=True)  # 档期内（end_at 未到）
-    game_count: Mapped[int] = mapped_column(Integer, default=0)  # 已解析 appid 的条目数
+    game_count: Mapped[int] = mapped_column(Integer, default=0)  # 包内条目数（全量，含未解析）
+    # 用户已读时刻：NULL = 本轮扫出的新包未读（前端 NEW 徽章，点击标记已读）。
+    # 存量库经列保障 ALTER 带 DEFAULT CURRENT_TIMESTAMP = 视为已读（升级不涌 NEW）；
+    # 新行写侧显式置 None（未读）。
+    acked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # 最近一次详情抓取

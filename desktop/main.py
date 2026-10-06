@@ -968,17 +968,19 @@ def _app_theme() -> str:
 def _brand_logo_path(theme: str = "dark") -> str | None:
     """弹窗标题栏 logo：深色面用浅色（白线条）版，浅色面用深色版。
 
-    logo_dark / logo_light 指「给哪种主题用」，反了会糊进底色。打包态
-    前端产物在 web/dist/assets/，找不到回退 _app_icon()。
+    logo_dark / logo_light 指「给哪种主题用」，反了会糊进底色。优先用
+    48px 标题栏专用 PNG（GDI+ 对 ICO 取帧有运气成分，20×20 显示位常拿
+    到大帧缩糊——0.2.1 反馈「图标显示不明确」的根因）；PNG 缺失退 ICO，
+    都找不到回退 _app_icon()。打包态前端产物在 web/dist/assets/。
     """
-    name = "logo_light.ico" if theme == "light" else "logo_dark.ico"
-    candidates: list[Path] = []
+    stem = "logo_titlebar_light" if theme == "light" else "logo_titlebar_dark"
+    ico = "logo_light.ico" if theme == "light" else "logo_dark.ico"
     if getattr(sys, "frozen", False):
         mei = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-        candidates.append(mei / "web" / "dist" / "assets" / name)
+        base = mei / "web" / "dist" / "assets"
     else:
-        candidates.append(PROJECT_ROOT / "web" / "public" / "assets" / name)
-    for candidate in candidates:
+        base = PROJECT_ROOT / "web" / "public" / "assets"
+    for candidate in (base / f"{stem}.png", base / ico):
         if candidate.is_file():
             return str(candidate)
     return _app_icon()

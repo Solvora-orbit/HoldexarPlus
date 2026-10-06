@@ -16,11 +16,20 @@ async def bundles() -> dict:
 
 @router.get("/bundles/{slug}")
 async def bundle_detail(slug: str) -> dict:
-    """单包详情 + 包内游戏条目（/games 同款卡片载荷）。未知 slug 404。"""
+    """单包详情 + 包内游戏条目（/games 同款卡片载荷；pending = 收录中条目）。
+    未知 slug 404。"""
     payload = await service.bundle_detail(slug)
     if payload is None:
         raise HTTPException(status_code=404, detail=f"未知捆绑包: {slug}")
     return payload
+
+
+@router.post("/bundles/{slug}/seen")
+async def mark_seen(slug: str) -> dict:
+    """点开包 = 已读（清 NEW 徽章，幂等）。未知 slug 404。"""
+    if not await service.mark_seen(slug):
+        raise HTTPException(status_code=404, detail=f"未知捆绑包: {slug}")
+    return {"ok": True}
 
 
 @router.post("/refresh")

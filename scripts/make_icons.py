@@ -151,6 +151,14 @@ def main() -> None:
         png.save(png_out)
         print(f"  {png_out.name}: {png_out.stat().st_size} bytes")
 
+    # 关闭弹窗标题栏专用（48px 无字样小标：20×20 显示位放全幅版必糊，
+    # 只留 H+ 单标；GDI+ 对 PNG 直接解码取首帧，无 ICO 选帧问题）
+    for palette, name in ((DARK, "logo_titlebar_dark.png"), (LIGHT, "logo_titlebar_light.png")):
+        tb = _master(palette, with_wordmark=False).resize((48, 48), Image.LANCZOS)
+        tb_out = ROOT / "web" / "public" / "assets" / name
+        tb.save(tb_out)
+        print(f"  {tb_out.name}: {tb_out.stat().st_size} bytes")
+
     # 预览图（不入库）：人工目检用
     preview = Path(tempfile.gettempdir()) / "holdexarplus_icon_preview.png"
     sheet = Image.new("RGBA", (SIZE * 2 + 24, SIZE), (128, 128, 128, 255))

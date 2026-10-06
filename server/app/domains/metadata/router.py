@@ -49,16 +49,17 @@ async def hb_choice_offers() -> dict:
 
 @router.get("/hb/history")
 async def hb_history(month: str | None = None) -> dict:
-    """进包记录（近一年，plus.3）：不给 month 返回月份清单（label/count/running），
+    """进包记录：不给 month 返回月份清单（label/count/running/抓取窗口偏好），
     给 month 返回该期游戏条目（/games 同构，前端 HlGameCard 直接渲染）。"""
     return await service.hb_history(month)
 
 
 @router.post("/hb/history/refresh")
-async def refresh_hb_history() -> dict:
-    """逐月补抓往期 HB 月包（后台任务，立即返回；进度看 /hb/history 的 running）。
-    每日调度同入口，KV 按月记账幂等，可重复触发。"""
-    return await service.start_hb_history_refresh()
+async def refresh_hb_history(months_back: int | None = None) -> dict:
+    """逐月补抓 HB 月包（后台任务，立即返回；进度看 /hb/history 的 running）。
+    months_back 显式给出时同时存为抓取窗口偏好（含当月，1..24 期 = 最多 2 年，
+    缺省 6）。每日调度与启动追赶用已存偏好，KV 按月记账幂等，可重复触发。"""
+    return await service.start_hb_history_refresh(months_back)
 
 
 @router.get("/steam/offers")

@@ -1,15 +1,16 @@
 <script setup lang="ts">
 /**
- * 捆绑包中心（plus.3）：多站捆绑包的统一入口，顶替原 Steam 捆绑包浏览页
- * （旧视图保留在 views/bundles/Index.vue，脱离路由备回归）。
+ * 捆绑包中心（plus.3 / 0.2.1）：多站捆绑包的统一入口，顶替原 Steam 捆绑包
+ * 浏览页（旧视图保留在 views/bundles/Index.vue，脱离路由备回归）。
  *
- * 范围：HB 月包（当月包 + 近一年进包记录，包内游戏对应 Steam，
- * 点击进详情看价格）+ Steam 捆绑包链接导入；其余站源（HB 捆绑包 /
- * Fanatical / 绿巨人）为注册表预留位，接入时在 SOURCES 加一项并补
- * 对应面板即可，页面骨架不变。
+ * 范围：HB 月包（当月包 + 进包记录，包内游戏对应 Steam，点击进详情看价格）
+ * + HB 捆绑包（HumbleBundlesPanel）+ Steam 捆绑包展示区与链接导入
+ * （SteamBundlesPanel + 页头导入对话框）；其余站源（Fanatical / 绿巨人）
+ * 为注册表预留位，接入时在 SOURCES 加一项并补对应面板即可，页面骨架不变。
  *
- * 进包数据链：后端逐月抓取往期 membership 页打标（KV 按月记账幂等），
- * 本页只做本地读（GET /metadata/hb/history）+ 手动补抓触发与轮询。
+ * 月包数据链：后端逐月抓 membership 页打标（含当月，KV 按月记账幂等），
+ * 本页本地读 + 抓取窗口选择（默认 6 期，上限 24 期 = 最多 2 年）+
+ * 手动补抓触发与轮询。
  */
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -26,6 +27,7 @@ import HlDialog from '@/components/ui/HlDialog.vue'
 import HlEmpty from '@/components/ui/HlEmpty.vue'
 import HlIcon from '@/components/ui/HlIcon.vue'
 import HlInput from '@/components/ui/HlInput.vue'
+import HlSelect from '@/components/ui/HlSelect.vue'
 import HlSpinner from '@/components/ui/HlSpinner.vue'
 import { message } from '@/components/ui'
 
@@ -67,7 +69,7 @@ function syncQuery() {
   })
 }
 
-// ─── 进包记录（近一年月份）+ 期游戏 ───
+// ─── 进包记录（月份窗口）+ 期游戏 ───
 const months = ref<HbHistoryMonth[]>([])
 const monthsLoading = ref(true)
 const running = ref(false)
@@ -75,21 +77,34 @@ const selectedMonth = ref('')
 const monthItems = ref<GameListItem[]>([])
 const monthTotal = ref(0)
 const monthLoading = ref(false)
+/* 抓取窗口（期数，含当月）：偏好从后端读（默认 6，上限 24 = 最多 2 年）；
+   选择即存并立刻按新窗口补抓（refresh 端点带 months_back 参数落 KV） */
+const monthsBack = ref(6)
+const maxMonthsBack = ref(24)
+
+const windowOptions = computed(() => {
+  const steps = [6, 12, 18, 24].filter((n) => n <= maxMonthsBack.value)
+  if (!steps.includes(monthsBack.value)) steps.push(monthsBack.value)
+  return steps.sort((a, b) => a - b)
+    .map((n) => ({ value: n, label: t('bundleshub.history.windowOpt', { n }) }))
+})
 
 async function loadMonths() {
   try {
     const res = await metadataApi.hbHistory()
     running.value = res.running
     months.value = res.months
+    monthsBack.value = res.monthsBack ?? 6
+    maxMonthsBack.value = res.maxMonthsBack ?? 24
     if (res.running) schedulePoll()
     if (!selectedMonth.value || !res.months.some((m) => m.label === selectedMonth.value)) {
       selectedMonth.value = res.months[0]?.label ?? ''
       if (selectedMonth.value) void loadMonthGames()
     }
-    // 进包记录不足一年且没有任务在跑：自动补抓一轮（0.2.0；打包版更新
-    // 当天错过 06:40 定点时免干等到次日。后端按 KV 月份记账幂等 + 重入
-    // 锁，本页每个实例只触发一次；调度器的启动补跑是更上游的双保险）
-    if (!res.running && !autoBackfillTried && res.months.length < 12) {
+    // 已记录月份不足当前窗口且没有任务在跑：自动补抓一轮（0.2.1；后端按
+    // KV 月份记账幂等 + 重入锁，本页每个实例只触发一次；调度器的启动补跑
+    // 是更上游的双保险）
+    if (!res.running && !autoBackfillTried && res.months.length < monthsBack.value) {
       autoBackfillTried = true
       void refreshHistory()
     }
@@ -120,10 +135,10 @@ function pickMonth(label: string) {
   void loadMonthGames()
 }
 
-/** 手动补抓：后端任务立即返回，running 期间轮询月份清单直到收敛 */
+/** 手动补抓：按当前窗口触发，后端任务立即返回，running 期间轮询月份清单直到收敛 */
 async function refreshHistory() {
   try {
-    const r = await metadataApi.refreshHbHistory()
+    const r = await metadataApi.refreshHbHistory(monthsBack.value)
     if (r.ok) {
       running.value = true
       message.info(t('bundleshub.history.started'))
@@ -132,6 +147,14 @@ async function refreshHistory() {
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   }
+}
+
+/** 换窗口：立即存偏好并按新窗口补抓（已记账的月份自动跳过，只补差额） */
+function selectWindow(n: string | number) {
+  const v = Number(n)
+  if (!Number.isFinite(v) || v === monthsBack.value) return
+  monthsBack.value = Math.max(1, Math.min(maxMonthsBack.value, v))
+  void refreshHistory()
 }
 
 let pollTimer: number | null = null
@@ -257,6 +280,16 @@ const monthCountLabel = computed(() =>
         </template>
         <span v-if="running" class="hub-running">{{ t('bundleshub.history.refreshing') }}</span>
         <div class="hub-record__spacer"></div>
+        <!-- 抓取窗口（期数含当月）：选择即存偏好并立刻按新窗口补差额 -->
+        <span class="hub-window__label">{{ t('bundleshub.history.window') }}</span>
+        <HlSelect
+          class="hub-window"
+          :model-value="monthsBack"
+          :options="windowOptions"
+          :disabled="running"
+          @update:model-value="selectWindow"
+        />
+        <span class="hub-window__hint">{{ t('bundleshub.history.windowHint', { max: maxMonthsBack }) }}</span>
         <HlButton size="sm" variant="text" :disabled="running" :loading="running" @click="refreshHistory">
           <HlIcon v-if="!running" name="refresh" :size="14" />
           {{ t('bundleshub.history.refresh') }}
@@ -397,6 +430,20 @@ const monthCountLabel = computed(() =>
 }
 .hub-record__spacer {
   flex: 1;
+}
+.hub-window__label {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.hub-window {
+  width: 110px;
+  flex-shrink: 0;
+}
+.hub-window__hint {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  margin-right: 4px;
 }
 .hub-month {
   display: inline-flex;

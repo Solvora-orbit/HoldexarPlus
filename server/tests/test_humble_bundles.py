@@ -228,3 +228,88 @@ async def test_bundle_detail_payload():
         if game is not None and game.name == _NAME_RE_T:
             await session.delete(game)
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_unresolved_entries_persist_with_pending(monkeypatch):
+    """0.2.1 全量条目：未解析标题也落行（appid NULL）——外层计数 = 抽屉可见
+    行数；详情载荷 pending 标 resolving，与 items 相加对得上 gameCount。"""
+    import asyncio as _a
+
+    monkeypatch.setattr(humble, "_REFRESH_LOCK", _a.Lock())
+
+    async def fake_page(session, proxy, url):
+        if url.endswith("/games"):
+            return _listing_html()
+        # 两页各含解析成功/失败两个标题
+        return (
+            '<html><script>window.P = {"preset_prices": ['
+            '{"price|money": {"currency": "CNY", "amount": 10.0}, "qualifying_tier_id": "initial"}], '
+            '"sections": [' + _display_item("Matched Game") + " " + _display_item("Missing Game") +
+            "]};</script></html>"
+        )
+
+    async def fake_resolve(session, title, proxy):
+        return APP_A1 if title == "Matched Game" else None
+
+    async def fake_proxy():
+        return None
+
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(humble, "_fetch_page", fake_page)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", fake_resolve)
+    monkeypatch.setattr(humble, "_strategy_proxy", fake_proxy)
+    monkeypatch.setattr(humble.asyncio, "sleep", no_sleep)
+
+    res = await humble.refresh_humble_bundles()
+    assert res["ok"] is True
+    async with get_session_factory()() as session:
+        a = await session.get(HumbleBundle, SLUG_A)
+        assert a is not None
+        assert a.game_count == 2  # 匹配 1 + 未解析 1
+        rows = (
+            await session.execute(
+                select(HumbleBundleGame.title, HumbleBundleGame.appid).where(
+                    HumbleBundleGame.slug == SLUG_A
+                )
+            )
+        ).all()
+        assert {t: ap for t, ap in rows} == {"Matched Game": APP_A1, "Missing Game": None}
+
+    detail = await humble.bundle_detail(SLUG_A)
+    assert detail is not None
+    assert detail["gameCount"] == 2
+    # 未入目录的 appid（APP_A1 此刻 games 无行）= ingesting；未解析 = resolving
+    by_title = {p["title"]: p["status"] for p in detail["pending"]}
+    assert by_title.get("Missing Game") == "resolving"
+    assert by_title.get("Matched Game") == "ingesting"
+
+
+@pytest.mark.asyncio
+async def test_new_badge_and_mark_seen():
+    """acked_at NULL → 列表 isNew=True；mark_seen 后已读（幂等）。"""
+    from datetime import datetime
+
+    now_dt = datetime(2026, 10, 6)
+    async with get_session_factory()() as session:
+        session.add(HumbleBundle(
+            slug=SLUG_B, name="Beta Pack", on_sale=True,
+            price_cny_fen=3360, game_count=0, acked_at=None,
+            first_seen_at=now_dt, last_seen_at=now_dt,
+        ))
+        await session.commit()
+
+    listing = await humble.list_bundles()
+    row_b = next(b for b in listing["bundles"] if b["slug"] == SLUG_B)
+    assert row_b["isNew"] is True
+
+    assert await humble.mark_seen(SLUG_B) is True
+    listing2 = await humble.list_bundles()
+    row_b2 = next(b for b in listing2["bundles"] if b["slug"] == SLUG_B)
+    assert row_b2["isNew"] is False
+
+    # 幂等：二次标记不报错；未知 slug 返回 False
+    assert await humble.mark_seen(SLUG_B) is True
+    assert await humble.mark_seen("hbtest-no-such") is False

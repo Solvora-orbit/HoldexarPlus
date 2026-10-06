@@ -248,32 +248,66 @@ async def _sync_bundle_detail(
     session: aiohttp.ClientSession, proxy: str | None, bundle: HumbleBundle,
     mark_updated: bool,
 ) -> dict:
-    """单包详情：价格 + 条目标题 → 关联 appid（只解新题/欠账题）。"""
+    """单包详情：价格 + 全部包内条目入库（0.2.1 全量语义）。
+
+    - 条目全量落 humble_bundle_games：已解析的带 appid，未解析的 appid NULL
+      留行——外层计数与抽屉可见条目从此一致（「外面说 14 点进去 6 个」的根修）。
+    - 欠账重试：已有行 appid 为 NULL 的标题参与本轮解析，成功即回填。
+    - 未入目录的 appid（games 表无行，比价无数据源）：单独触发一次性首爬
+      （scope=appids，与 HB 月包补价同型），下一轮/刷新后卡片自然齐全。"""
     from app.crawler.utils import get_beijing_time_obj
+    from app.domains.games.models import Game
     from app.domains.metadata import service as metadata_service
 
     page = await _fetch_page(session, proxy, bundle.url)
     if not page:
         return {"slug": bundle.slug, "ok": False}
     detail = parse_bundle_detail(page, bundle.name)
+    titles: list[str] = detail["titles"]
 
     async with get_session_factory()() as s:
-        known = {
-            row[0] for row in await s.execute(
-                select(HumbleBundleGame.title).where(HumbleBundleGame.slug == bundle.slug)
+        rows = (
+            await s.execute(
+                select(HumbleBundleGame.title, HumbleBundleGame.appid).where(
+                    HumbleBundleGame.slug == bundle.slug
+                )
             )
-        }
-    new_titles = [t for t in detail["titles"] if t not in known]
+        ).all()
+    resolved_known = {t for t, a in rows if a is not None}
+    pending_known = {t for t, a in rows if a is None}
+    # 只解「新面孔 + 上轮欠账」；已有关联跳过（storesearch 省额度）
+    to_resolve = [t for t in titles if t not in resolved_known]
 
     resolved: dict[str, int] = {}
     unresolved: list[str] = []
-    for title in new_titles:
+    for title in to_resolve:
         appid = await metadata_service._resolve_appid(session, title, proxy)
         if appid is None:
-            unresolved.append(title)  # 不入库欠账行——下轮 known 里没有它，自动重试
+            unresolved.append(title)
         else:
             resolved[title] = appid
         await asyncio.sleep(0.3)
+
+    # 解析成功但目录无行的 appid → 单独首爬补收录（与月包补价同款语义）
+    need_ingest: list[int] = []
+    if resolved:
+        async with get_session_factory()() as s:
+            have = {
+                r[0] for r in await s.execute(
+                    select(Game.appid).where(Game.appid.in_(list(resolved.values())))
+                )
+            }
+        need_ingest = sorted({a for a in resolved.values() if a not in have})
+        if need_ingest:
+            try:
+                from app.domains.crawl import service as crawl_service
+
+                await crawl_service.run_sequential(
+                    [{"scope": "appids", "appids": need_ingest, "kind": "humble_backfill"}]
+                )
+            except Exception:  # noqa: BLE001
+                # 任务占用等登记失败不阻塞本轮入库——下轮刷新重试
+                logger.info("[humble-bundles] %s 首爬登记跳过：%d 款", bundle.slug, len(need_ingest))
 
     now = get_beijing_time_obj().replace(tzinfo=None)
     async with write_gate(WritePriority.BACKGROUND, label="humble_sync"), get_session_factory()() as s:
@@ -287,8 +321,43 @@ async def _sync_bundle_detail(
                 update(HumbleBundle).where(HumbleBundle.slug == bundle.slug)
                 .values(updated_at=now)
             )
-        for title, appid in resolved.items():
-            s.add(HumbleBundleGame(slug=bundle.slug, appid=appid, title=title))
+        existing = {
+            t: a for t, a in await s.execute(
+                select(HumbleBundleGame.title, HumbleBundleGame.appid).where(
+                    HumbleBundleGame.slug == bundle.slug
+                )
+            )
+        }
+        for title in titles:
+            if title in resolved:
+                if title in existing:
+                    if existing[title] is None:
+                        await s.execute(
+                            update(HumbleBundleGame)
+                            .where(
+                                HumbleBundleGame.slug == bundle.slug,
+                                HumbleBundleGame.title == title,
+                            )
+                            .values(appid=resolved[title])
+                        )
+                else:
+                    s.add(HumbleBundleGame(slug=bundle.slug, appid=resolved[title], title=title))
+            elif title not in existing:
+                # 未解析也落行（appid 留空）：外层计数 = 全部条目，欠账下轮重试
+                s.add(HumbleBundleGame(slug=bundle.slug, appid=None, title=title))
+        # 页面已消失的旧条目清理（仅删未解析欠账行；已有关联的保留历史）
+        title_set = set(titles)
+        stale_unresolved = [t for t in existing if t not in title_set and existing[t] is None]
+        if stale_unresolved:
+            for g in (
+                await s.execute(
+                    select(HumbleBundleGame).where(
+                        HumbleBundleGame.slug == bundle.slug,
+                        HumbleBundleGame.title.in_(stale_unresolved),
+                    )
+                )
+            ).scalars():
+                await s.delete(g)
         count_sq = (
             select(func.count())
             .select_from(HumbleBundleGame)
@@ -301,8 +370,9 @@ async def _sync_bundle_detail(
             .values(game_count=count_sq)
         )
         await s.commit()
-    return {"slug": bundle.slug, "ok": True, "titles": len(detail["titles"]),
-            "resolved": len(resolved), "unresolved": unresolved}
+    return {"slug": bundle.slug, "ok": True, "titles": len(titles),
+            "resolved": len(resolved), "pendingRetry": len(pending_known),
+            "ingestQueued": len(need_ingest), "unresolved": unresolved}
 
 
 async def refresh_humble_bundles() -> dict:
@@ -374,9 +444,13 @@ async def list_bundles() -> dict:
     items = [
         {
             "slug": r.slug, "name": r.name, "image": r.image, "url": r.url,
-            "priceCnyFen": r.price_cny_fen, "endAt": r.end_at.isoformat() if r.end_at else None,
+            "priceCnyFen": r.price_cny_fen,
+            "startAt": r.start_at.isoformat() if r.start_at else None,
+            "endAt": r.end_at.isoformat() if r.end_at else None,
             "onSale": r.on_sale and (r.end_at is None or r.end_at >= now),
             "gameCount": r.game_count,
+            # 本轮扫出的新包未读（NEW 徽章）；用户点开包 = 已读（mark_seen）
+            "isNew": r.acked_at is None,
         }
         for r in rows
         if r.on_sale and (r.end_at is None or r.end_at >= now)
@@ -384,27 +458,67 @@ async def list_bundles() -> dict:
     return {"running": running, "bundles": items}
 
 
+async def mark_seen(slug: str) -> bool:
+    """点开包 = 已读：清 NEW 徽章（幂等，已有时刻不覆盖）。"""
+    from app.crawler.utils import get_beijing_time_obj
+
+    now = get_beijing_time_obj().replace(tzinfo=None)
+    async with write_gate(WritePriority.BACKGROUND, label="humble_seen"), get_session_factory()() as s:
+        bundle = await s.get(HumbleBundle, slug)
+        if bundle is None:
+            return False
+        if bundle.acked_at is None:
+            bundle.acked_at = now
+            await s.commit()
+    return True
+
+
 async def bundle_detail(slug: str) -> dict | None:
-    """单包详情：包信息 + 包内游戏（/games 同款条目卡，点击进详情比价）。"""
+    """单包详情：包信息 + 包内游戏。
+
+    0.2.1 条目一致语义：items = 已收录游戏（/games 同款卡，点进详情比价）；
+    pending = 尚无卡片的条目——未解析（resolving，storesearch 欠账下轮重试）
+    与已解析但目录收录中（ingesting，首爬排队）。抽屉可见行数 = 全部条目，
+    与外层 gameCount 对得上。"""
     from app.domains.games import service as games_service
+    from app.domains.games.models import Game
 
     async with get_session_factory()() as s:
         bundle = await s.get(HumbleBundle, slug)
         if bundle is None:
             return None
-        games = (
+        rows = (
             await s.execute(
-                select(HumbleBundleGame.appid).where(
-                    HumbleBundleGame.slug == slug, HumbleBundleGame.appid.is_not(None)
+                select(HumbleBundleGame.appid, HumbleBundleGame.title).where(
+                    HumbleBundleGame.slug == slug
                 )
             )
-        ).scalars().all()
-    payload = {
+        ).all()
+        appids = [int(a) for a, _ in rows if a is not None]
+        # 有 appid 但 games 目录还没行的 = 首爬收录中
+        have: set[int] = set()
+        if appids:
+            have = {
+                r[0] for r in await s.execute(
+                    select(Game.appid).where(Game.appid.in_(appids))
+                )
+            }
+    pending = [
+        {"appid": int(a) if a is not None else None, "title": title,
+         "status": "ingesting" if a is not None and int(a) not in have else "resolving"}
+        for a, title in rows
+        if a is None or int(a) not in have
+    ]
+    payload: dict = {
         "slug": bundle.slug, "name": bundle.name, "image": bundle.image, "url": bundle.url,
         "priceCnyFen": bundle.price_cny_fen,
+        "startAt": bundle.start_at.isoformat() if bundle.start_at else None,
         "endAt": bundle.end_at.isoformat() if bundle.end_at else None,
-        "items": [], "total": 0,
+        "gameCount": len(rows),
+        "items": [], "total": 0, "pending": pending,
     }
-    if games:
-        payload.update(await games_service.list_items_by_appids(list(games)))
+    if appids:
+        cards = await games_service.list_items_by_appids(appids)
+        payload["items"] = cards["items"]
+        payload["total"] = cards["total"]
     return payload

@@ -138,6 +138,54 @@ def test_month_page_url_from_machine_name():
     assert hb._month_page_url(None) == hb._MEMBERSHIP_URL
 
 
+def test_past_month_specs_includes_current_month():
+    """0.2.1：窗口含当月（当月任务错过定点时历史链兜底），往前数 months_back 期。"""
+    from app.crawler.utils import get_beijing_time_obj
+
+    now = get_beijing_time_obj()
+    specs = hb._past_month_specs(6)
+    assert len(specs) == 6
+    assert specs[0]["machine"] == f"{_MONTH_NAMES_EN[now.month].lower()}_{now.year}"
+    # 窗口边界：第 6 条 = 5 个月前
+    total = now.year * 12 + now.month - 1 - 5
+    assert specs[5]["machine"].endswith(f"_{total // 12}")
+    # 全部走 membership 往期页 URL（含当月）
+    assert all(s["url"].startswith("https://www.humblebundle.com/membership/") for s in specs)
+
+
+_MONTH_NAMES_EN = {
+    1: "January", 2: "February", 3: "March", 4: "April", 5: "May", 6: "June",
+    7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December",
+}
+
+
+@pytest.mark.asyncio
+async def test_history_months_back_pref_clamp(monkeypatch):
+    """抓取窗口偏好：默认 6 期；越界钳到 [1,24]（上限 2 年）；坏值回默认。"""
+    from app.domains.settings.service import set_value
+
+    monkeypatch.setattr(hb, "_HB_HISTORY_PREF_KEY", "hb_history_months_back_test")
+    assert await hb.get_history_months_back() == 6
+    await set_value("hb_history_months_back_test", 12)
+    assert await hb.get_history_months_back() == 12
+    await set_value("hb_history_months_back_test", 99)
+    assert await hb.get_history_months_back() == 24
+    await set_value("hb_history_months_back_test", "abc")
+    assert await hb.get_history_months_back() == 6
+    # 显式窗口写进 start 即存偏好（钳到上限），并透传给刷新任务
+    import asyncio
+
+    captured: dict = {}
+    async def fake_refresh(months_back=None):
+        captured["got"] = months_back
+        return {"ok": True}
+    monkeypatch.setattr(hb, "refresh_hb_history", fake_refresh)
+    await hb.start_hb_history_refresh(40)
+    await asyncio.sleep(0)  # 放行 create_task 排的一拍
+    assert captured.get("got") == 24
+    assert await hb.get_history_months_back() == 24
+
+
 @pytest.mark.asyncio
 async def test_offers_payload_and_empty_month(monkeypatch):
     """展示链：有游标 + 标记行 → ok 载荷（URL 推导/国区价/评价排序）；

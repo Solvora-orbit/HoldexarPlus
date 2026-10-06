@@ -53,6 +53,7 @@ const shell: Partial<Record<MessageKey, string>> = {
 
   'shell.tour': 'Getting started',
   'shell.backtop': 'Back to top',
+  'shell.drawer.resize': 'Drag to resize',
   'shell.sidebar.expand': 'Expand sidebar',
   'shell.sidebar.collapse': 'Collapse sidebar',
   'shell.theme.toLight': 'Switch to light theme',

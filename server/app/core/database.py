@@ -232,6 +232,12 @@ _TABLE_EXTRA_COLUMNS: dict[str, dict[str, str]] = {    "games": {
     "proxy_job_runs": {
         "crawl_job_id": "INTEGER",
     },
+    # HB 捆绑包已读时刻（0.2.1）：NULL = 新包未读（前端 NEW 徽章）。
+    # 存量行的「视为已读」回填在迁移步 13（SQLite 的 ALTER 不接受
+    # CURRENT_TIMESTAMP 这类非常量默认值，DDL 只能是裸 DATETIME）。
+    "humble_bundles": {
+        "acked_at": "DATETIME",
+    },
     # 价格周期的阶段时刻与生产统计（统计口径见 crawl/stats.py）：
     # 统计列全为 NULL = 本轮没留下统计（未收敛 / 进程中断）
     "price_cycles": {
@@ -343,7 +349,7 @@ def _ensure_schema(sync_conn) -> None:
 #   2. _MIGRATIONS 追加 (版本号, 描述, SQL 列表)；SQL 须幂等（中断续跑 +
 #      用户库版本乱序防御），复杂逻辑可登记 async fn(engine) 同位元素
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 # 零小数货币（Steam 以整数计价）：旧捆绑包链路的除数表按 1 处理，与「统一存分」
 # 的新约定差 100 倍——v2 归一的目标集合
@@ -865,6 +871,27 @@ async def _migrate_player_tags(conn) -> None:
         await conn.execute(text("ALTER TABLE games DROP COLUMN genres"))
 
 
+async def _migrate_humble_acked_at(conn) -> None:
+    """v13：humble_bundles.acked_at 存量回填「视为已读」。
+
+    0.2.1 起 acked_at NULL = 新包未读（NEW 徽章）。本列上线前抓的包都是
+    旧数据，不回填的话用户升级当天会看到满屏 NEW；回填一次即与列保障的
+    ALTER 对齐（列缺失场景不存在：迁移链在 _ensure_schema 之后跑）。
+    带表存在守卫：0.2.0 之前的库此刻还没有 humble 表（create_all 已建出
+    空表则 UPDATE 为 no-op；全新安装同样安全）。幂等：WHERE acked_at IS NULL。
+    """
+    from sqlalchemy import text
+
+    has_table = await conn.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='humble_bundles'")
+    )
+    if has_table.first() is None:
+        return
+    await conn.execute(text(
+        "UPDATE humble_bundles SET acked_at = CURRENT_TIMESTAMP WHERE acked_at IS NULL"
+    ))
+
+
 # (目标版本, 说明, 迁移体)：迁移体 = SQL 语句列表，或 async callable(engine)
 _MIGRATIONS: list[tuple[int, str, object]] = [
     (2, "bundle_region_prices 零小数货币单位归一（元→分 + cny_fen 去虚高）",
@@ -914,6 +941,9 @@ _MIGRATIONS: list[tuple[int, str, object]] = [
     (12, "玩家标签接替 genres：删除 games.genres（旧 appdetails 链路的粗粒度大类，"
          "写入者已删除、覆盖率停在 12.9%；标签两表由模型 create_all 建）",
      _migrate_player_tags),
+    (13, "humble_bundles.acked_at 存量回填已读（0.2.1 NEW 徽章上线：升级前抓的包"
+         "不该当日涌新；列本身由列保障层 ALTER 补，本步只回填值）",
+     _migrate_humble_acked_at),
 ]
 
 
@@ -1054,6 +1084,7 @@ async def init_db() -> None:
     from app.domains.crawl import events as _crawl_events  # noqa: F401
     from app.domains.crawl import models as _crawl_models  # noqa: F401
     from app.domains.games import models as _games_models  # noqa: F401
+    from app.domains.humble import models as _humble_models  # noqa: F401
     from app.domains.monitoring import models as _monitoring_models  # noqa: F401
     from app.domains.notifications import models as _notification_models  # noqa: F401
     from app.domains.proxies import models as _proxies_models  # noqa: F401

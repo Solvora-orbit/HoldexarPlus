@@ -598,11 +598,13 @@ async def refresh_hb_choice() -> dict:
     }
 
 
-# ─── HB 月包历史：往期 membership 页逐月补抓（plus.3）─────────────
+# ─── HB 月包历史：往期 membership 页逐月补抓（plus.3 / 0.2.1 可调窗口）──
 # 往期页（/membership/<Month>-<Year>）未登录同样可读（仅缺
 # activeContentMachineName 等当月字段），条目结构与当月页一致，月份从
 # URL 推导。逐月抓取 → storesearch 解析 appid → 打标；KV 按 machine
 # 月份记账，幂等可重跑（整月有未解析条目不记账，下次补抓续跑）。
+# 0.2.1：窗口用户可调（默认 6 期含当月，上限 24 期 = 最多 2 年）；
+# 当月也入历史链（06:40 的当月包任务在启动日可能错过，历史轮兜底）。
 
 _MONTH_NAMES = {
     1: "January", 2: "February", 3: "March", 4: "April",
@@ -611,19 +613,40 @@ _MONTH_NAMES = {
 }
 _PAST_MONTH_URL = "https://www.humblebundle.com/membership/{slug}"
 _HB_HISTORY_KEY = "hb_history_months"
-_HB_HISTORY_WINDOW = 12
+# 抓取窗口偏好（用户可调）：默认 6 期，上限 24 期（2 年——更早的包页已下架）
+_HB_HISTORY_PREF_KEY = "hb_history_months_back"
+_HB_HISTORY_DEFAULT = 6
+_HB_HISTORY_MAX = 24
+# 展示/记账窗口上限：记录最多回看 2 年
+_HB_HISTORY_WINDOW = _HB_HISTORY_MAX
 
 _history_lock = asyncio.Lock()
 _history_task: asyncio.Task | None = None
 
 
-def _past_month_specs(months_back: int = _HB_HISTORY_WINDOW) -> list[dict]:
-    """从上个月起往回数 months_back 期的抓取清单（machine/label/url）。"""
+async def get_history_months_back() -> int:
+    """当前抓取窗口（期数，含当月）。越界/损坏值回默认，不落写。"""
+    from app.domains.settings.service import get_value
+
+    raw = await get_value(_HB_HISTORY_PREF_KEY, _HB_HISTORY_DEFAULT)
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return _HB_HISTORY_DEFAULT
+    return max(1, min(_HB_HISTORY_MAX, n))
+
+
+def _past_month_specs(months_back: int) -> list[dict]:
+    """从当月起往前数 months_back 期的抓取清单（machine/label/url）。
+
+    0.2.1 起含当月（offset 0）：当月包由每日 06:40 的当月任务负责，但更新
+    当天可能错过定点——历史链兜底跑当月，机器名与打标函数同一套幂等判据，
+    双路重复打标无副作用。"""
     from app.crawler.utils import get_beijing_time_obj
 
     now = get_beijing_time_obj()
     specs: list[dict] = []
-    for offset in range(1, months_back + 1):
+    for offset in range(0, months_back):
         total = now.year * 12 + now.month - 1 - offset
         year, month = divmod(total, 12)
         month += 1
@@ -654,15 +677,20 @@ async def _fetch_past_month_page(
         return None
 
 
-async def refresh_hb_history(months_back: int = _HB_HISTORY_WINDOW) -> dict:
+async def refresh_hb_history(months_back: int | None = None) -> dict:
     """逐月补抓往期 HB Choice → games.is_hb/hb_data（每日调度与手动触发同入口）。
 
-    当月不在补抓范围（refresh_hb_choice 负责）；幂等判据：KV 按月份 machine
-    记账，已记账月份跳过。空月也记账（避免每天重打同一张空页）。"""
+    months_back = 窗口期数（含当月）：缺省读用户偏好（默认 6，上限 24 = 2 年）。
+    幂等判据：KV 按月份 machine 记账，已记账月份跳过（0.2.1 起当月也入窗，
+    与 06:40 当月任务双路兜底，打标函数幂等无重复副作用）。空月也记账
+    （避免每天重打同一张空页）。"""
     from app.domains.settings.service import get_value, set_value
 
     if _history_lock.locked():
         return {"source": "hb-history", "ok": False, "error": "已有历史补抓在进行"}
+    if months_back is None:
+        months_back = await get_history_months_back()
+    months_back = max(1, min(_HB_HISTORY_MAX, int(months_back)))
     async with _history_lock:
         proxy = await _strategy_proxy()
         connector = aiohttp.TCPConnector(limit=4, ttl_dns_cache=60)
@@ -717,13 +745,20 @@ async def refresh_hb_history(months_back: int = _HB_HISTORY_WINDOW) -> dict:
         return {"source": "hb-history", "ok": True, "months": months, "markedTotal": marked_total}
 
 
-async def start_hb_history_refresh() -> dict:
-    """后台启动历史补抓（HTTP 立即返回：整轮要抓 12 页 + 逐条 storesearch，
-    约一两分钟，不能占着请求；进度看 hb_history() 的 running）。"""
+async def start_hb_history_refresh(months_back: int | None = None) -> dict:
+    """后台启动历史补抓（HTTP 立即返回：整轮最多 24 页 + 逐条 storesearch，
+    约一两分钟，不能占着请求；进度看 hb_history() 的 running）。
+    显式传 months_back 时把窗口存为用户偏好（中心页的「抓取窗口」选择）。"""
     global _history_task
+    if months_back is not None:
+        from app.domains.settings.service import set_value
+
+        # 钳到 [1, 24] 后落偏好并透传（接收侧还有一道钳，双保险同值）
+        months_back = max(1, min(_HB_HISTORY_MAX, int(months_back)))
+        await set_value(_HB_HISTORY_PREF_KEY, months_back)
     if _history_task is not None and not _history_task.done():
         return {"source": "hb-history", "ok": True, "started": False, "running": True}
-    _history_task = asyncio.create_task(refresh_hb_history())
+    _history_task = asyncio.create_task(refresh_hb_history(months_back))
     return {"source": "hb-history", "ok": True, "started": True, "running": True}
 
 
@@ -758,6 +793,9 @@ async def hb_history(month: str | None = None) -> dict:
         return {
             "running": running,
             "months": [{"label": lb, "count": len(months[lb])} for lb in ordered[:_HB_HISTORY_WINDOW]],
+            # 抓取窗口偏好与上限（中心页选择器展示：默认 6 期、最多 24 期）
+            "monthsBack": await get_history_months_back(),
+            "maxMonthsBack": _HB_HISTORY_MAX,
         }
     payload: dict = {"running": running, "month": month, "items": [], "total": 0}
     if month in months:

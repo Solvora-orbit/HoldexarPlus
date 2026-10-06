@@ -146,6 +146,37 @@ async def test_player_tags_v12_drops_genres(isolated_db: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_humble_acked_at_v13_backfills_seen(isolated_db: Path) -> None:
+    """v13：humble_bundles 存量行回填已读（升级不涌 NEW 徽章）；
+    无表/新装空表安全，重放幂等（WHERE acked_at IS NULL）。"""
+    con = sqlite3.connect(str(isolated_db))
+    con.execute(
+        "CREATE TABLE humble_bundles (slug TEXT PRIMARY KEY, name TEXT, acked_at DATETIME)"
+    )
+    con.execute("INSERT INTO humble_bundles (slug, name, acked_at) VALUES ('old-a', 'A', NULL)")
+    con.execute("INSERT INTO humble_bundles (slug, name, acked_at) VALUES ('old-b', 'B', NULL)")
+    con.execute("PRAGMA user_version = 12")
+    con.commit()
+    con.close()
+
+    database_module._MIGRATIONS.append(
+        (13, "humble acked_at 存量回填", database_module._migrate_humble_acked_at)
+    )
+    await database_module._run_schema_migrations()
+
+    assert _user_version(isolated_db) == 13
+    con = sqlite3.connect(str(isolated_db))
+    try:
+        rows = con.execute(
+            "SELECT slug, acked_at FROM humble_bundles ORDER BY slug"
+        ).fetchall()
+        assert [r[0] for r in rows] == ["old-a", "old-b"]
+        assert all(r[1] is not None for r in rows)  # 存量全部视为已读
+    finally:
+        con.close()
+
+
+@pytest.mark.asyncio
 async def test_snapshot_taken_only_when_migration_pending(isolated_db: Path) -> None:
     """无差额不落快照；有差额先落快照，且快照里是**迁移前**的版本号。
 

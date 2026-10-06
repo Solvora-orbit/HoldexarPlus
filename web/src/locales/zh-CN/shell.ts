@@ -69,6 +69,7 @@ const shell = {
   /* 外壳自身的控件（不属于任何路由条目） */
   'shell.tour': '新手教程',
   'shell.backtop': '返回顶部',
+  'shell.drawer.resize': '拖动调整宽度',
   'shell.sidebar.expand': '展开侧边栏',
   'shell.sidebar.collapse': '折叠侧边栏',
   'shell.theme.toLight': '切换到浅色主题',

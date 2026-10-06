@@ -1498,10 +1498,14 @@ export interface HumbleBundleItem {
   url: string
   /** 包价（人民币分；preset_prices 最低档）；null = 未解析 */
   priceCnyFen: number | null
-  /** 截止 ISO（null = 长期在售） */
+  /** 档期起止 ISO（null = 缺字段/长期在售） */
+  startAt: string | null
   endAt: string | null
   onSale: boolean
+  /** 包内条目总数（0.2.1 全量语义：含解析中与收录中） */
   gameCount: number
+  /** 本轮扫出的新包未读（点开即已读） */
+  isNew: boolean
 }
 
 export interface HumbleBundlesPayload {
@@ -1510,17 +1514,28 @@ export interface HumbleBundlesPayload {
   bundles: HumbleBundleItem[]
 }
 
-export interface HumbleBundleDetailPayload extends HumbleBundleItem {
+/** 详情抽屉里的非卡片条目（resolving=解析欠账，ingesting=目录收录中） */
+export interface HumblePendingGame {
+  appid: number | null
+  title: string
+  status: 'resolving' | 'ingesting'
+}
+
+export interface HumbleBundleDetailPayload extends Omit<HumbleBundleItem, 'isNew'> {
   items: GameListItem[]
   total: number
+  pending: HumblePendingGame[]
 }
 
 export const humbleApi = {
   /** 在售 HB 捆绑包列表（纯本地读，零外网） */
   bundles: () => request<HumbleBundlesPayload>('GET', '/humble/bundles'),
-  /** 单包详情：包信息 + 包内游戏（/games 同款卡片载荷） */
+  /** 单包详情：包信息 + 包内游戏（/games 同款卡片载荷）+ 收录中条目 */
   bundleDetail: (slug: string) =>
     request<HumbleBundleDetailPayload>('GET', `/humble/bundles/${encodeURIComponent(slug)}`),
+  /** 点开包 = 已读（清 NEW 徽章，幂等） */
+  seen: (slug: string) =>
+    request<{ ok: boolean }>('POST', `/humble/bundles/${encodeURIComponent(slug)}/seen`),
   /** 启动一轮刷新（后台任务立即返回；running 轮询 bundles 端点） */
   refresh: () => request<{ ok: boolean; started: boolean; running: boolean }>('POST', '/humble/refresh'),
 }
@@ -2753,10 +2768,11 @@ export const metadataApi = {
   /** 指定期的进包记录（/games 同构条目，HlGameCard 直接渲染） */
   hbHistoryMonth: (month: string) =>
     request<HbHistoryMonthPayload>('GET', `/metadata/hb/history${toQuery({ month })}`),
-  /** 逐月补抓往期月包（后台任务，立即返回；进度轮询 hbHistory 的 running） */
-  refreshHbHistory: () =>
+  /** 逐月补抓 HB 月包（后台任务，立即返回；进度轮询 hbHistory 的 running）。
+   *  monthsBack 显式给出 = 同时存为抓取窗口偏好（含当月，1..24 期） */
+  refreshHbHistory: (monthsBack?: number) =>
     request<{ ok: boolean; started: boolean; running: boolean }>(
-      'POST', '/metadata/hb/history/refresh',
+      'POST', `/metadata/hb/history/refresh${toQuery({ months_back: monthsBack })}`,
     ),
   /** 正在赠送中的 Steam 限时免费（纯本地库读；offers 空 = 无赠送，模块整块隐藏） */
   steamFreeOffers: () => request<SteamFreeOffersPayload>('GET', '/metadata/steam/offers'),
@@ -2820,8 +2836,12 @@ export interface HbHistoryMonth {
 export interface HbHistoryPayload {
   /** 往期补抓后台任务进行中（前端据此轮询） */
   running: boolean
-  /** 近一年窗口内的月份，新→旧 */
+  /** 窗口内的月份（含当月，按用户抓取窗口记录），新→旧 */
   months: HbHistoryMonth[]
+  /** 当前抓取窗口（期数，含当月；默认 6） */
+  monthsBack: number
+  /** 窗口上限（期数；24 = 最多 2 年） */
+  maxMonthsBack: number
 }
 
 export interface HbHistoryMonthPayload {
