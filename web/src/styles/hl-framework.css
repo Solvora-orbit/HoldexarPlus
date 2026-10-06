@@ -1511,6 +1511,10 @@ html:not(.dark) .hl-table th { color: var(--text-secondary); }
   padding: var(--pane-pad, 60px 24px);
 }
 .hl-backtop {
+  position: fixed;
+  right: 24px;
+  bottom: 28px;
+  z-index: 80;
   width: 40px;
   height: 40px;
   border-radius: 50%;

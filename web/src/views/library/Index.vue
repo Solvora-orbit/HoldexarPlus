@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { gamesApi, invalidateGetCache, type GameListItem } from '@/api/client'
 import { useCrawlStatusStore } from '@/stores/crawlStatus'
@@ -17,6 +17,7 @@ import HlNavbar from '@/components/business/HlNavbar.vue'
 import HlFilterPanel from '@/components/business/HlFilterPanel.vue'
 import HlGameCard from '@/components/business/HlGameCard.vue'
 import {
+  HlBacktop,
   HlButton,
   HlCheckbox,
   HlEmpty,
@@ -38,6 +39,7 @@ const crawlStatus = useCrawlStatusStore()
 const crawl = useCrawlStatusStore()
 const regionsStore = useRegionsStore()
 const router = useRouter()
+const route = useRoute()
 // 领航台：找游戏页主入口（全局单例抽屉，经 store 开启）
 const pilotStore = usePilotStore()
 // 千分位随界面语言：模板里每渲染一行都会重算，且 `fmt` 内部现读 locale，
@@ -497,8 +499,24 @@ function setupObserver() {
 
 watch(sentinel, () => setupObserver())
 
+// ─── 深链预设（外部入口用 query 注入筛选，先例：/rates?currency）───
+/** /library?discount=1 → 打开「仅折中」（仪表盘打折卡/降价动态入口）。
+ *  应用后立刻清掉 query：不然 keep-alive 往返时每次激活都会重新套用，
+ *  用户手动取消筛选也会被"复活"。 */
+function applyQueryPreset() {
+  if (route.query.discount != null) {
+    if (route.query.discount === '1' && !store.onlyDiscounted) store.onlyDiscounted = true
+    void router.replace({ query: { ...route.query, discount: undefined } })
+  }
+}
+
+/** 回顶按钮跟随当前布局的滚动容器：网格 = .view-container（整页滚），
+ *  列表 = HlScrollList 内部滚动区。 */
+const backtopTarget = computed(() => (store.layoutMode === 'list' ? '.hl-scroll-list' : '.view-container'))
+
 onMounted(() => {
   scrollEl = document.querySelector('.view-container')
+  applyQueryPreset()
   load(true)
 })
 
@@ -509,6 +527,7 @@ defineOptions({ name: 'LibraryFinder' })
 let savedScrollTop = 0
 let everActivated = false
 onActivated(() => {
+  applyQueryPreset()
   if (!everActivated) {
     everActivated = true
     return
@@ -775,6 +794,9 @@ onBeforeUnmount(() => {
         <template v-else-if="!hasNextPage">{{ t('library.end') }}</template>
       </div>
     </div>
+
+    <!-- 回顶：跟随当前布局的滚动容器（网格=整页 / 列表=内滚区） -->
+    <HlBacktop :target="backtopTarget" />
 
     <!-- 撤销条：最近一次移除的款可一键恢复（6 秒后收起；「已移除」视图是常驻出路） -->
     <HlUndoToast

@@ -7,10 +7,16 @@
  * capture 阶段注册，先于 WebView2 内建加速键与页面内按键处理。
  */
 
-/** 强制刷新当前页（绕过 index.html 的 HTTP 缓存） */
+/** 强制刷新当前页（绕过 index.html 的 HTTP 缓存）。
+ *  预取目标是**白名单字面量** SPA 入口 `/`：桌面壳固定从根路径打开应用
+ *  （desktop/main.py 的 app_url 不带路径），pushState 导航不产生新的 HTTP
+ *  缓存条目，所以根路径的 index.html 就是唯一会被缓存的入口文档——
+ *  不从 location 动态拼 URL，杜绝把预取引导到任意地址的可能。 */
+const SPA_ENTRY = "/"
+
 export async function forceReloadPage(): Promise<void> {
   try {
-    await fetch(location.href, { cache: "reload" })
+    await fetch(SPA_ENTRY, { cache: "reload" })
   } catch {
     /* 后端不可达时照常 reload，让页面呈现错误态而非无响应 */
   }
