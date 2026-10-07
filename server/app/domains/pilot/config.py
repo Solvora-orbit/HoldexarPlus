@@ -6,7 +6,8 @@
 - pilot.llm.provider_key.<id>  供应商 API Key（逐家独立派生加密，写时即密文）
 - pilot.llm.enabled            bool，LLM 解读总开关（全局；关闭时领航台仍直出模板化事实摘要）
 - pilot.llm.model              当前选用模型名（属于活跃供应商的清单）
-- pilot.llm.monthly_cap        单月 token 用量上限（全局；超限停用解读，模板摘要不受限）
+- pilot.llm.monthly_cap        单月 token 用量上限（全局；0 = 不设上限（0.3.0 默认）；
+                               超限停用解读，模板摘要不受限，仍可自行设置）
 - pilot.usage.<YYYYMM>         当月已用 token 累计（用量台账，跨月自然换键）
 
 存量单配置（pilot.llm.protocol/base_url/models/api_key）在账本键缺失时
@@ -22,7 +23,8 @@ from app.crawler.utils import get_beijing_time_obj
 from app.domains.pilot import llm as pilot_llm
 from app.domains.settings import service as settings_service
 
-DEFAULT_MONTHLY_CAP = 500_000
+# 0 = 不设上限（0.3.0 起默认：月度用量默认不限，仍可自行设置）
+DEFAULT_MONTHLY_CAP = 0
 
 _ENABLED_KEY = "pilot.llm.enabled"
 _PROTOCOL_KEY = "pilot.llm.protocol"
@@ -334,7 +336,8 @@ async def add_usage(inp: int, out: int) -> None:
 
 
 def over_cap(usage: dict, cap: int) -> bool:
-    return usage["total"] >= cap
+    """cap<=0 = 不设上限（0.3.0 默认）。"""
+    return cap > 0 and usage["total"] >= cap
 
 
 def llm_ready(cfg: dict) -> bool:

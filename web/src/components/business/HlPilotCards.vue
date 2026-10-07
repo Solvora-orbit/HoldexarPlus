@@ -5,7 +5,7 @@
  * （整行可点进详情）、action 动作回执卡、navigate 导航卡。
  * 样式只取设计 token；折扣徽章/好评率分级沿用游戏卡既有惯例。
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import {
   formatCnyFen,
@@ -24,6 +24,7 @@ import type {
 } from '@/api/client'
 import { useI18n, type MessageKey } from '@/locales'
 import { pilotCoverUrl, positivePct, ratingClass } from '@/lib/pilotView'
+import { HlButton, HlIcon } from '@/components/ui'
 import HlImg from '@/components/ui/HlImg.vue'
 import CurrencyFlag from '@/components/CurrencyFlag.vue'
 import RegionFlag from '@/components/RegionFlag.vue'
@@ -45,6 +46,18 @@ const emit = defineEmits<{
 const { t, locale } = useI18n()
 
 const visible = computed(() => (props.cards || []).filter(Boolean))
+
+/* 折叠收纳（0.3.0）：超过 3 张只铺前 3，其余收进「展开其余 N 张」；
+   卡片列表整体换轮（新一轮回答）时收起——克制优先，完整可查 */
+const COLLAPSE_AFTER = 3
+const expanded = ref(false)
+const shownCards = computed(() =>
+  expanded.value || visible.value.length <= COLLAPSE_AFTER
+    ? visible.value
+    : visible.value.slice(0, COLLAPSE_AFTER),
+)
+const hiddenCount = computed(() => Math.max(0, visible.value.length - COLLAPSE_AFTER))
+watch(() => props.cards, () => { expanded.value = false })
 
 function fen(v: number | null | undefined): string {
   return typeof v === 'number' && v > 0 ? formatCnyFen(v) : '—'
@@ -320,7 +333,7 @@ function toggleTrend(appid: number) {
 
 <template>
   <div
-    v-for="(c, ci) in visible"
+    v-for="(c, ci) in shownCards"
     :key="ci"
     class="pcard"
     :class="`pcard--${c.kind}`"
@@ -709,6 +722,16 @@ function toggleTrend(appid: number) {
     <template v-else-if="c.kind === 'stepper'">
       <HlPilotStepper :card="c" />
     </template>
+  </div>
+
+  <!-- 折叠收纳（0.3.0）：多于 3 张收拢，展开/收起同位切换 -->
+  <div v-if="visible.length > COLLAPSE_AFTER" class="pcard__fold">
+    <HlButton size="sm" variant="text" @click="expanded = !expanded">
+      <HlIcon name="chevron-down" :size="13" :class="{ 'pcard__fold-icon--up': expanded }" />
+      {{ expanded
+        ? t('pilot.cards.collapse')
+        : t('pilot.cards.expand', { n: hiddenCount }) }}
+    </HlButton>
   </div>
 </template>
 
@@ -1607,5 +1630,15 @@ function toggleTrend(appid: number) {
 .pcard__acts :deep(.hl-btn) {
   padding: 5px 14px;
   font-size: 12px;
+}
+
+/* 折叠收纳按钮行（0.3.0） */
+.pcard__fold {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 2px;
+}
+.pcard__fold-icon--up {
+  transform: rotate(180deg);
 }
 </style>

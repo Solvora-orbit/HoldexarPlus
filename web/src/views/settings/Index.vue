@@ -1637,7 +1637,12 @@ onUnmounted(stopLoginPolling)
             <div class="pilot-form__field pilot-form__field--inline">
               <HlInput v-model="pilotCapText" style="max-width: 180px" />
               <span class="pilot-form__hint">
-                {{ t('pilot.settings.usage', { total: pilotUsage.total, inp: pilotUsage.inp, out: pilotUsage.out, calls: pilotUsage.calls }) }}
+                <template v-if="Number(pilotCapText) > 0">
+                  {{ t('pilot.settings.usage', { total: pilotUsage.total, inp: pilotUsage.inp, out: pilotUsage.out, calls: pilotUsage.calls }) }}
+                </template>
+                <template v-else>
+                  {{ t('pilot.settings.cap_unlimited', { total: pilotUsage.total }) }}
+                </template>
               </span>
               <HlButton size="sm" :loading="globalSaving" @click="savePilotGlobal">
                 <HlIcon name="check" />
