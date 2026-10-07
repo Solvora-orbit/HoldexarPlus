@@ -29,11 +29,7 @@ target-version = "py311"  # 与 CI 最低版本、README 声明一致
 line-length = 100
 extend-exclude = [
     "release",
-    "reference",
-    "reference-repos",
     "web/node_modules",
-    # 迁移期的历史归档，不参与新代码规范
-    "data.old",
 ]
 
 [tool.ruff.lint]

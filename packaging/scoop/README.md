@@ -2,17 +2,25 @@
 
 [Scoop](https://scoop.sh) 是 Windows 上的命令行包管理器，专为**便携应用**设计：
 不写注册表、不装服务、解压到 `~/scoop/apps/`，`scoop uninstall` 即干净移除。
-Holdexar 本身就是 PyInstaller onedir 便携包（解压即用、无安装器），是 Scoop 的
+HoldexarPlus 本身就是 PyInstaller onedir 便携包（解压即用、无安装器），是 Scoop 的
 典型目标形态——所以这是一条成本极低、收益明确的分发渠道。
 
 ## 用户怎么装
 
+> ⚠️ **自有 Scoop 渠道尚未开通**：本 fork 的清单（`holdexarplus.json`）已随
+> 每次发版构建产出，但还没有可加的自有 bucket 仓库（待建，见下文「bucket
+> 仓库怎么建」）。**不要**用上游作者的 `GLrone/scoop-bucket` 装 `holdexar`
+> ——那是原项目（非本 fork），更新源、品牌与本应用都不同。
+> 当前安装方式：GitHub Releases 便携 zip + 应用内更新。
+
+渠道开通后的目标形态：
+
 ```powershell
-scoop bucket add holdexar https://github.com/GLrone/scoop-bucket
-scoop install holdexar
+scoop bucket add holdexarplus https://github.com/Solvora-orbit/scoop-bucket
+scoop install holdexarplus
 ```
 
-装完开始菜单出现快捷方式，`holdexar` 可直接在终端唤起。
+装完开始菜单出现 HoldexarPlus 快捷方式。
 
 ## 清单在哪
 
@@ -27,19 +35,22 @@ python scripts/build_release.py     # 出包（内含 build_manifest.py）
 python scripts/build_manifest.py
 ```
 
-产物落 `release/scoop/holdexar.json`，内容形如：
+产物落 `release/scoop/holdexarplus.json`（文件名按 APP_NAME，publish_release.py
+认的就是这个名字），内容形如：
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.2.1",
+  "homepage": "https://github.com/Solvora-orbit/HoldexarPlus",
+  "license": "GPL-3.0-only",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/GLrone/Holdexar/releases/download/v0.1.0/Holdexar-win64-v0.1.0.zip",
+      "url": "https://github.com/Solvora-orbit/HoldexarPlus/releases/download/v0.2.1/HoldexarPlus-win64-v0.2.1.zip",
       "hash": "<zip 的 sha256>",
-      "extract_dir": "Holdexar"
+      "extract_dir": "HoldexarPlus"
     }
   },
-  "shortcuts": [["Holdexar.exe", "Holdexar"]],
+  "shortcuts": [["HoldexarPlus.exe", "HoldexarPlus"]],
   "checkver": { "url": ".../releases/download/updater/latest.json", "jsonpath": "$.version" },
   "autoupdate": { ... }
 }
@@ -47,8 +58,8 @@ python scripts/build_manifest.py
 
 两个关键点：
 
-- **`extract_dir: "Holdexar"`** —— zip 内根目录是 `Holdexar/`，不下钻会把
-  整个目录结构散在 `apps/holdexar/current/` 下。
+- **`extract_dir: "HoldexarPlus"`** —— zip 内根目录是 `HoldexarPlus/`，不下钻会把
+  整个目录结构散在 `apps/holdexarplus/current/` 下。
 - **`checkver` 直接读我们的更新清单** —— Scoop 检查渠道版本时不打
   `api.github.com`，和客户端检查更新走的是同一个出口（`updater` tag 下的
   `latest.json`）。免 API 限速，且国内可达。
@@ -68,16 +79,16 @@ python scripts/publish_release.py --scoop-dir <bucket 仓库本地路径>
 独立一个仓库（Scoop 约定名 `scoop-bucket`，仓库根下放 `bucket/` 目录）：
 
 ```
-GLrone/scoop-bucket
+Solvora-orbit/scoop-bucket
 └── bucket/
-    └── holdexar.json     ← publish_release.py --scoop-dir 写入的就是这里
+    └── holdexarplus.json   ← publish_release.py --scoop-dir 写入的就是这里
 ```
 
 仓库只需要一个 `README.md` 和这个 `bucket/` 目录，无需任何构建配置。
 
 ## 备选：提交到官方 Extras
 
-如果希望用户不额外加 bucket 就能装（`scoop install extras/holdexar`），
+如果希望用户不额外加 bucket 就能装（`scoop install extras/holdexarplus`），
 可以向 [ScoopInstaller/Extras](https://github.com/ScoopInstaller/Extras) 提 PR。
 官方清单要求更严（需有稳定下载地址、`license` 字段规范、通过
 `checkver.ps1` 自检），且后续每次发版需要维护 PR。建议先跑通自有 bucket，
@@ -89,5 +100,5 @@ GLrone/scoop-bucket
 |---|---|---|
 | GitHub Releases 便携 zip | 所有人（手动下载） | 已有 |
 | 应用内更新（读 `latest.json`） | 已安装用户 | 已有 |
-| Scoop | 习惯命令行管包的开发者 | 本目录 |
+| Scoop | 习惯命令行管包的开发者 | 渠道在建（自有 bucket 未开通，清单已随发版产出） |
 | winget | 需要系统级安装（开始菜单/卸载项）的用户 | 需先做安装器，暂缓 |

@@ -32,8 +32,8 @@ body:
     id: version
     attributes:
       label: 版本
-      description: 关于页 / 启动日志里的 v0.1.0 这类版本号；绿色版写 zip 文件名
-      placeholder: v0.1.0-beta
+      description: 关于页 / 启动日志里的 v0.2.1 这类版本号；绿色版写 zip 文件名
+      placeholder: v0.2.1
     validations:
       required: true
 
