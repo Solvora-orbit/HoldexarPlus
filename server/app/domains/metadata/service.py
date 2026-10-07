@@ -844,7 +844,10 @@ async def hb_choice_offers() -> dict:
     async with get_session_factory()() as session:
         rows = (
             await session.execute(
-                select(Game.appid, Game.name, Game.header_image, Game.min_cny_fen)
+                select(
+                    Game.appid, Game.name, Game.header_image, Game.min_cny_fen,
+                    Game.updated_at,
+                )
                 .where(Game.is_hb.is_(True), Game.hb_data.like(f"%{label}%"))
                 .order_by(func.coalesce(Game.review_count, 0).desc(), Game.appid)
             )
@@ -890,6 +893,8 @@ async def hb_choice_offers() -> dict:
                 "originalPriceFen": prices.get(int(r.appid), (None, None, 0))[1],
                 "discount": prices.get(int(r.appid), (None, None, 0))[2] or 0,
                 "lowestCnyFen": r.min_cny_fen,
+                # 占位行（打标建行、首爬未回）= 收录中（0.2.3 月包可见性）
+                "pending": r.updated_at is None,
             }
             for r in rows
         ],

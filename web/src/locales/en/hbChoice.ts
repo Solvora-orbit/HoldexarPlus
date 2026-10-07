@@ -8,6 +8,7 @@ const hbChoice = {
   'hbChoice.goMonth': 'Open bundle',
   'hbChoice.skip': 'Skip month',
   'hbChoice.empty': 'This month’s bundle has not been synced yet',
+  'hbChoice.ingesting': 'ingesting',
 } as const
 
 export default hbChoice

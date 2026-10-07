@@ -160,6 +160,10 @@ onBeforeUnmount(() => {
                 class="hb-card__orig"
               >{{ formatCnyFen(g.originalPriceFen) }}</span>
             </template>
+            <!-- 占位行（收录中）：无价时给出进度语义而非死白（0.2.3） -->
+            <span v-else-if="g.pending" class="hb-card__ingesting">
+              {{ t('hbChoice.ingesting') }}
+            </span>
             <span v-else class="hb-card__now hb-card__now--none">—</span>
           </span>
         </div>
@@ -378,6 +382,13 @@ onBeforeUnmount(() => {
 /* 无价格行（占位行待回补）：占位符不强调 */
 .hb-card__now--none {
   font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* 收录中（占位行首爬未回，0.2.3）：进度语义小标，弱化不强调 */
+.hb-card__ingesting {
+  font-size: 11px;
+  font-weight: 500;
   color: var(--text-muted);
 }
 

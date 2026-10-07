@@ -36,3 +36,10 @@ async def mark_seen(slug: str) -> dict:
 async def refresh() -> dict:
     """后台启动一轮列表+详情刷新（立即返回；每日调度同入口，幂等）。"""
     return await service.start_refresh()
+
+
+@router.post("/bundles/ingest-now")
+async def ingest_now() -> dict:
+    """立即跑一轮目录收录扫描（后台分批首爬，立即返回；bundles 端点
+    ingestRunning/ingestPending 轮询收尾）。"""
+    return await service.start_ingest_now()

@@ -8,6 +8,7 @@ const hbChoice = {
   'hbChoice.goMonth': '前往月包',
   'hbChoice.skip': '跳过本月',
   'hbChoice.empty': '当月包尚未入库，等待每日抓取',
+  'hbChoice.ingesting': '收录中',
 } as const
 
 export default hbChoice

@@ -493,49 +493,58 @@ async def start_refresh() -> dict:
     return {"ok": True, "started": True, "running": True}
 
 
-# 单轮批量首爬上限：防极端候选（页面塞了几百条目）打爆队列，余额下拍续跑
+# 单批首爬上限 × 单轮批次上限：防极端候选打爆队列；一轮最多 2000 款，
+# 余额（或爬虫被占）留待下拍——候选判定是 games 行存在性，天然续跑
 _INGEST_BATCH = 200
+_INGEST_MAX_BATCHES = 10
 
 
 async def _queue_ingest(appids: list[int], source: str) -> int:
     """批量登记一次性首爬（scope=appids，与月包补价同管线）。
 
-    占用（409）等失败静默留痕：候选判定是 games 行存在性，下拍天然重试。"""
-    ids = sorted(set(appids))[:_INGEST_BATCH]
+    爬虫占用（start_job RuntimeError → run_sequential 跳过该 spec）或
+    异常都表现为「本批零任务跑完」，返回 0 让调用方停止本轮循环；
+    欠账由下拍候选重算自然续。"""
+    ids = list(dict.fromkeys(appids))[:_INGEST_BATCH]
     if not ids:
         return 0
     try:
         from app.domains.crawl import service as crawl_service
 
-        await crawl_service.run_sequential(
+        results = await crawl_service.run_sequential(
             [{"scope": "appids", "appids": ids, "kind": "humble_backfill"}]
         )
     except Exception:  # noqa: BLE001
         logger.info("[humble-ingest] %s 首爬登记跳过（%d 款留待下拍）", source, len(ids))
         return 0
+    if not results:
+        logger.info("[humble-ingest] %s 爬虫占用跳过本批（%d 款留待下拍）", source, len(ids))
+        return 0
     logger.info("[humble-ingest] %s 登记首爬 %d 款", source, len(ids))
     return len(ids)
 
 
-async def scan_missing_ingest() -> dict:
-    """收录扫描（0.2.2 专用逻辑）：在售包内已解析 appid、但 Steam 目录
-    还没有行的游戏 → 批量登记首爬收录。
-
-    与详情抓取解耦：刷新链尾跑一轮，调度器另有每日独立一拍——抓取失败/
-    跳过的那几天，收录欠账照常补。幂等账本 = games 行存在（首爬成功建
-    行即退出候选；行存在但价格未出也不重复爬，价格轮自己管）。"""
+async def _ingest_candidates() -> list[int]:
+    """未收录候选（在售包、appid 已解析、games 无行），NEW 包优先序：
+    同一 appid 挂多包时取最新包的档期；包按 first_seen_at 降序（今日
+    新扫出的包先入批），无档期信息垫底，同包内按 appid 升序保底确定性。"""
     from app.domains.games.models import Game
 
     async with get_session_factory()() as s:
-        candidates = (
+        rows = (
             await s.execute(
-                select(HumbleBundleGame.appid)
+                select(HumbleBundleGame.appid, HumbleBundle.first_seen_at)
                 .join(HumbleBundle, HumbleBundle.slug == HumbleBundleGame.slug)
                 .where(HumbleBundle.on_sale.is_(True), HumbleBundleGame.appid.is_not(None))
-                .distinct()
             )
-        ).scalars().all()
-        appids = [int(a) for a in candidates]
+        ).all()
+        freshness: dict[int, object] = {}
+        for a, seen in rows:
+            a = int(a)
+            cur = freshness.get(a)
+            if seen is not None and (cur is None or seen > cur):  # type: ignore[operator]
+                freshness[a] = seen
+        appids = list(freshness)
         have: set[int] = set()
         if appids:
             have = {
@@ -544,8 +553,62 @@ async def scan_missing_ingest() -> dict:
                 )
             }
     missing = [a for a in appids if a not in have]
-    queued = await _queue_ingest(missing, "scan")
-    return {"ok": True, "candidates": len(missing), "queued": queued}
+    # 两步稳定排序=单键复合序：先按 appid 升序保底，再按包档期降序
+    # （新包在前；无档期行视作最旧垫底，稳定保持组内 appid 升序）
+    missing.sort()
+    missing.sort(
+        key=lambda a: freshness[a] if freshness[a] is not None else datetime.min,  # type: ignore[arg-type,return-value]
+        reverse=True,
+    )
+    return missing
+
+
+async def scan_missing_ingest() -> dict:
+    """收录扫描（0.2.3 强化：appid 先行、轮内连续分批）：在售包内已解析
+    appid、但 Steam 目录还没有行的游戏 → 按批登记首爬，直到候选清空、
+    爬不动（占用/失败）或吃满单轮上限。
+
+    与详情抓取解耦：刷新链尾跑一轮，调度器另有每日独立一拍，面板还可
+    手动触发（ingest-now）。幂等账本 = games 行存在（首爬成功建行即
+    退出候选；行存在但价格未出也不重复爬，价格轮自己管）。轮内以
+    attempted 记账防同批死循环：本批爬失败（行没长出来）不再重试，
+    留给下一拍。"""
+    candidates = await _ingest_candidates()
+    queued = 0
+    batches = 0
+    attempted: set[int] = set()
+    while batches < _INGEST_MAX_BATCHES:
+        pool = [a for a in candidates if a not in attempted]
+        if not pool:
+            break
+        batch = pool[:_INGEST_BATCH]
+        got = await _queue_ingest(batch, "scan")
+        if got == 0:
+            break
+        attempted.update(batch)
+        queued += got
+        batches += 1
+    return {
+        "ok": True,
+        "candidates": len(candidates),  # 本轮扫描起点的欠账款数
+        "queued": queued,
+        "batches": batches,
+        "remaining": len(candidates) - queued,  # 占用截断/轮上限未吃满的余额
+    }
+
+
+# 手动收录轮（ingest-now）：同一时刻只允许一轮（与 _refresh_task 同款防重）
+_ingest_task: asyncio.Task | None = None
+
+
+async def start_ingest_now() -> dict:
+    """后台立即跑一轮收录扫描（轮内连续分批；前端经 bundles 的
+    ingestRunning 轮询收尾）。已在跑则不重复启动。"""
+    global _ingest_task
+    if _ingest_task is not None and not _ingest_task.done():
+        return {"ok": True, "started": False, "running": True}
+    _ingest_task = asyncio.create_task(scan_missing_ingest())
+    return {"ok": True, "started": True, "running": True}
 
 
 async def list_bundles() -> dict:
@@ -553,6 +616,12 @@ async def list_bundles() -> dict:
     from app.crawler.utils import get_beijing_time_obj
 
     running = _refresh_task is not None and not _refresh_task.done()
+    ingest_running = _ingest_task is not None and not _ingest_task.done()
+    # 目录收录欠账（appid 已解析、games 无行）：面板「收录中 N」汇总口径
+    try:
+        ingest_pending = len(await _ingest_candidates())
+    except Exception:  # noqa: BLE001 —— 汇总数读失败不阻断列表
+        ingest_pending = 0
     async with get_session_factory()() as s:
         rows = (
             await s.execute(
@@ -575,7 +644,8 @@ async def list_bundles() -> dict:
         for r in rows
         if r.on_sale and (r.end_at is None or r.end_at >= now)
     ]
-    return {"running": running, "bundles": items}
+    return {"running": running, "ingestRunning": ingest_running,
+            "ingestPending": ingest_pending, "bundles": items}
 
 
 async def mark_seen(slug: str) -> bool:
@@ -629,8 +699,9 @@ async def bundle_detail(slug: str) -> dict | None:
         for a, title in rows
         if a is None or int(a) not in have
     ]
-    # 档位（0.2.2）：存的是每档「本档新增」；这里展开成售卖语义——
-    # 每档带累计计数与本档新增游戏（title→appid 由条目表回挂）。
+    # 档位（0.2.2 存本档新增；0.2.3 展开累进售卖语义）：每档 games =
+    # 买那一档实际能拿到的全部游戏（跨档去重累计，本档新增带 isNew 标），
+    # newGames/newCount 保留作「本档新增」小标。
     # 旧数据 tiers_json NULL → 空数组，前端回退平铺。
     title_appid: dict[str, int | None] = {}
     for a, title in rows:
@@ -642,14 +713,17 @@ async def bundle_detail(slug: str) -> dict | None:
         except (ValueError, TypeError):
             raw_tiers = []
         seen: set[str] = set()
+        acc: list[dict] = []  # 累进清单：截至当前档的全部去重条目
         for idx, t in enumerate(raw_tiers if isinstance(raw_tiers, list) else []):
             if not isinstance(t, dict):
                 continue
-            news = [
-                {"title": x, "appid": title_appid.get(x)}
-                for x in (t.get("titles") or [])
+            new_titles = [
+                x for x in (t.get("titles") or [])
                 if isinstance(x, str) and x not in seen and not seen.add(x)
             ]
+            news = [{"title": x, "appid": title_appid.get(x)} for x in new_titles]
+            acc.extend(news)
+            cutoff = len(acc) - len(news)  # 尾段 = 本档新增
             tiers_out.append({
                 "id": str(t.get("id") or f"t{idx}"),
                 "priceCnyFen": t.get("price_cny_fen"),
@@ -657,6 +731,9 @@ async def bundle_detail(slug: str) -> dict | None:
                 "newGames": news,
                 "newCount": len(news),
                 "count": len(seen),  # 累计：买这档一共拿多少款
+                "games": [
+                    {**g, "isNew": i >= cutoff} for i, g in enumerate(acc)
+                ],
             })
     payload: dict = {
         "slug": bundle.slug, "name": bundle.name, "image": bundle.image, "url": bundle.url,

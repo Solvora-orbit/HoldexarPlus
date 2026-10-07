@@ -358,8 +358,8 @@ async def test_new_badge_and_mark_seen():
 
 @pytest.mark.asyncio
 async def test_detail_tiers_cumulative_payload():
-    """0.2.2 API 档位展开：每档带本档新增（title+appid 回挂）与累计计数；
-    累计跨档去重。"""
+    """API 档位展开（0.2.3 累进售卖语义）：每档 games = 买那档实拿的全部
+    （跨档去重累计、本档新增带 isNew），newGames/newCount/count 保留。"""
     import json as _json
     from datetime import datetime
 
@@ -384,6 +384,15 @@ async def test_detail_tiers_cumulative_payload():
     assert d is not None
     tiers = d["tiers"]
     assert [t["id"] for t in tiers] == ["initial", "bt20"]
+
+    # 累进清单：第 1 档 = 本档 1 款；第 2 档 = 第 1 档 + 本档新增（去重后 2 款）
+    assert tiers[0]["games"] == [
+        {"title": "Matched Game", "appid": APP_A1, "isNew": True}
+    ]
+    assert tiers[1]["games"] == [
+        {"title": "Matched Game", "appid": APP_A1, "isNew": False},
+        {"title": "Missing Game", "appid": None, "isNew": True},
+    ]
     assert tiers[0]["newGames"][0] == {"title": "Matched Game", "appid": APP_A1}
     assert tiers[0]["count"] == 1
     # 第二档：重复的 Matched Game 被去重，只剩新增的 Missing（appid 未解析 None）
@@ -440,3 +449,97 @@ async def test_scan_missing_ingest_rules(monkeypatch):
         if have is not None:
             await session.delete(have)
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_scan_ingest_new_pack_first(monkeypatch):
+    """0.2.3 NEW 包优先：候选按包 first_seen_at 降序——新扫出的包的欠账
+    先入批（同日包内 appid 升序保底确定性）。"""
+    from datetime import datetime
+
+    calls: list[list[int]] = []
+
+    async def fake_run(specs, **_):
+        calls.append(list(specs[0]["appids"]))
+        return [{"id": 1}]
+
+    monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run)
+
+    async with get_session_factory()() as session:
+        session.add(HumbleBundle(
+            slug=SLUG_A, name="Old Pack", on_sale=True, game_count=0,
+            first_seen_at=datetime(2026, 10, 1), last_seen_at=datetime(2026, 10, 1),
+        ))
+        session.add(HumbleBundle(
+            slug=SLUG_B, name="New Pack", on_sale=True, game_count=0,
+            first_seen_at=datetime(2026, 10, 6), last_seen_at=datetime(2026, 10, 6),
+        ))
+        # 旧包 appid 更大：证明排序吃的是包档期不是 appid 数值
+        for appid in (990710, 990711):
+            session.add(HumbleBundleGame(slug=SLUG_A, appid=appid, title=f"old{appid}"))
+        for appid in (990701, 990702):
+            session.add(HumbleBundleGame(slug=SLUG_B, appid=appid, title=f"new{appid}"))
+        await session.commit()
+
+    res = await humble.scan_missing_ingest()
+    assert res["queued"] == 4 and res["batches"] == 1
+    assert calls[0] == [990701, 990702, 990710, 990711], "新包欠账排前"
+
+
+@pytest.mark.asyncio
+async def test_scan_ingest_multi_batch_until_drained(monkeypatch):
+    """0.2.3 轮内连续分批：候选超过单批上限时逐批吃满（每批跑完即下一批，
+    本用例打桩直接「爬成」），不再留到下拍；批数被轮上限护栏封顶。"""
+    from datetime import datetime
+
+    calls: list[list[int]] = []
+
+    async def fake_run(specs, **_):
+        calls.append(list(specs[0]["appids"]))
+        return [{"id": 1}]
+
+    monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run)
+    monkeypatch.setattr(humble, "_INGEST_BATCH", 2)
+    monkeypatch.setattr(humble, "_INGEST_MAX_BATCHES", 3)
+
+    async with get_session_factory()() as session:
+        session.add(HumbleBundle(
+            slug=SLUG_A, name="Pack", on_sale=True, game_count=0,
+            first_seen_at=datetime(2026, 10, 5), last_seen_at=datetime(2026, 10, 5),
+        ))
+        for appid in range(990721, 990729):  # 8 款欠账
+            session.add(HumbleBundleGame(slug=SLUG_A, appid=appid, title=f"g{appid}"))
+        await session.commit()
+
+    res = await humble.scan_missing_ingest()
+    # 8 候选、批 2、轮上限 3 → 3 批 6 款，余额 2 留下拍
+    assert res == {"ok": True, "candidates": 8, "queued": 6, "batches": 3, "remaining": 2}
+    assert calls == [[990721, 990722], [990723, 990724], [990725, 990726]]
+
+
+@pytest.mark.asyncio
+async def test_scan_ingest_occupied_breaks_loop(monkeypatch):
+    """爬虫被占（run_sequential 跳过全部 spec → 零结果）：本轮立即停，
+    queued=0、欠账原样留在 remaining，由下拍/下轮续——不空转重试。"""
+    from datetime import datetime
+
+    calls: list[list[int]] = []
+
+    async def fake_run(specs, **_):
+        calls.append(list(specs[0]["appids"]))
+        return []  # 占用跳过
+
+    monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run)
+
+    async with get_session_factory()() as session:
+        session.add(HumbleBundle(
+            slug=SLUG_A, name="Pack", on_sale=True, game_count=0,
+            first_seen_at=datetime(2026, 10, 5), last_seen_at=datetime(2026, 10, 5),
+        ))
+        for appid in (990741, 990742):
+            session.add(HumbleBundleGame(slug=SLUG_A, appid=appid, title=f"g{appid}"))
+        await session.commit()
+
+    res = await humble.scan_missing_ingest()
+    assert res["queued"] == 0 and res["batches"] == 0 and res["remaining"] == 2
+    assert len(calls) == 1, "占用后不得继续排批空转"

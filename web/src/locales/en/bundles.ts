@@ -41,7 +41,14 @@ const bundles: Partial<Record<MessageKey, string>> = {
   'bundles.humble.ingesting': 'ingesting',
   'bundles.humble.tier': 'Tier {i}',
   'bundles.humble.tierMeta': '{n} games total · {m} added here',
-  'bundles.humble.tierEmpty': 'No extra games at this tier',
+  'bundles.humble.tierEmpty': 'No games to show for this tier',
+  'bundles.humble.tierBar': 'Price tiers',
+  'bundles.humble.tierCount': '{n} games',
+  'bundles.humble.tierHint': 'This tier gives you {n} games total, {m} added here',
+  'bundles.humble.tierNewBadge': 'New here',
+  'bundles.humble.ingestCount': '{n} ingesting',
+  'bundles.humble.ingestStarted': 'Ingest round started (batched first crawl)',
+  'bundles.humble.ingestDone': 'Ingest round finished',
   'bundles.humble.detailEmpty': 'Games in this bundle are not resolved yet — the crawler fills them in over the next runs.',
 
   /* Steam bundles panel (components/business/SteamBundlesPanel.vue, 0.2.0) */

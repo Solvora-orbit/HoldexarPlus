@@ -57,7 +57,14 @@ const bundles = {
   'bundles.humble.ingesting': '收录中',
   'bundles.humble.tier': '第 {i} 档',
   'bundles.humble.tierMeta': '共含 {n} 款 · 本档新增 {m}',
-  'bundles.humble.tierEmpty': '本档没有新增游戏',
+  'bundles.humble.tierEmpty': '该档暂无可展示的游戏',
+  'bundles.humble.tierBar': '价格档位',
+  'bundles.humble.tierCount': '共 {n} 款',
+  'bundles.humble.tierHint': '买这档共能拿到 {n} 款，其中 {m} 款是本档新增',
+  'bundles.humble.tierNewBadge': '本档新增',
+  'bundles.humble.ingestCount': '收录中 {n} 款',
+  'bundles.humble.ingestStarted': '已开始一轮收录（分批首爬）',
+  'bundles.humble.ingestDone': '收录轮已结束',
   'bundles.humble.detailEmpty': '包内游戏尚未解析完成（后台抓取会逐轮补齐），稍后再来查看。',
 
   /* ── Steam 捆绑包面板（components/business/SteamBundlesPanel.vue，0.2.0）── */
