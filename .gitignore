@@ -198,3 +198,6 @@ server/.vite/
 # Mimosa 安全门禁 hook 的会话状态（findings ledger / baseline 缓存，不入库）
 .mimosa/
 web/.mimosa/
+
+# run.py --dev 自动拉起的 Vite 日志（开发态本机产物）
+vite-dev.log

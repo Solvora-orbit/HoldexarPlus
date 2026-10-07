@@ -911,7 +911,6 @@ _DIALOG_THEMES: dict[str, dict] = {
         "close_fg_hover": (255, 255, 255),
         # 关闭键圆形悬停底：半透明白（FromArgb 参数序是 (a, r, g, b)）
         "close_hover_bg": (32, 255, 255, 255),
-        "logo": "logo_dark.ico",         # 深色面 → 浅色（白色线条）logo
     },
     "light": {
         "bg": (247, 250, 253),           # #f7fafd（surface-pop-deep）
@@ -928,7 +927,6 @@ _DIALOG_THEMES: dict[str, dict] = {
         "close_fg": (100, 119, 140),     # #64778c（浅色面叉线用深灰蓝）
         "close_fg_hover": (23, 32, 42),  # #17202a
         "close_hover_bg": (26, 23, 32, 42),  # 半透明深（a,r,g,b）
-        "logo": "logo_light.ico",        # 浅色面 → 深色线条 logo
     },
 }
 
@@ -1295,8 +1293,6 @@ def _build_close_dialog(owner=None, theme: str | None = None):
         FormStartPosition,
         Label as WinLabel,
         MouseButtons,
-        PictureBox,
-        PictureBoxSizeMode,
     )
     from System.Drawing import Region
 
@@ -1321,9 +1317,14 @@ def _build_close_dialog(owner=None, theme: str | None = None):
     BTN_X0 = (WIDTH - (BTN_W * 2 + BTN_GAP)) // 2  # 组居中：起点 52
 
     def _round_button(
-        text: str, dialog_result, x: int, y: int, font, fill, hover, text_color
+        text: str, dialog_result, x: int, y: int, font, fill, hover, text_color,
+        pen=None, hover_text=None,
     ) -> WinButton:
-        """圆角纯色按键（自绘）。
+        """圆角自绘按键：实心（pen=None）与描边 ghost（给 pen）两型。
+
+        ghost 型 = 0.2.2 关闭弹窗的「退出程序」样式：平时透明底 + 彩色描边
+        与文字（视觉重量低于实心红），hover 反实心、文字翻转——反馈明确，
+        默认态不再用满版红「吓退」。实心型保持原语义（主操作强调）。
 
         不用 FlatStyle.Flat（方角 + 系统描边 + 固定面色，且无圆角可调），
         也不用 override OnPaint——pythonnet 对 Python 子类的虚方法分派不生效，
@@ -1346,7 +1347,9 @@ def _build_close_dialog(owner=None, theme: str | None = None):
             | ControlStyles.OptimizedDoubleBuffer,
             True,
         )
-        state = {"fill": fill}
+        hover_text = hover_text if hover_text is not None else text_color
+        bg_fill = _c("bg")  # ghost 常态底色：与窗底同色（盖住圆角外露像素）
+        state = {"fill": fill, "text": text_color, "filled": pen is None}
 
         def _on_paint(sender, e):
             g = e.Graphics
@@ -1359,24 +1362,37 @@ def _build_close_dialog(owner=None, theme: str | None = None):
             path.AddArc(rect.Right - radius, rect.Bottom - radius, radius, radius, 0, 90)
             path.AddArc(rect.X, rect.Bottom - radius, radius, radius, 90, 90)
             path.CloseFigure()
-            g.FillPath(SolidBrush(state["fill"]), path)
+            if state["filled"]:
+                # 实心（含 ghost 的 hover 反色态）
+                g.FillPath(SolidBrush(state["fill"]), path)
+            elif pen is not None:
+                # 描边态：底色走窗底，圆环描边 + 彩色文字
+                g.FillPath(SolidBrush(bg_fill), path)
+                g.DrawPath(Pen(pen, 1.4), path)
             fmt = StringFormat()
             fmt.Alignment = StringAlignment.Center
             fmt.LineAlignment = StringAlignment.Center
             g.DrawString(
                 text,
                 btn.Font,
-                SolidBrush(text_color),
+                SolidBrush(state["text"]),
                 RectangleF(0.0, 0.0, float(btn.Width), float(btn.Height)),
                 fmt,
             )
 
         def _on_enter(sender, e):
-            state["fill"] = hover
+            if pen is None:
+                state["fill"] = hover  # 实心：换面色
+            else:
+                state["fill"] = hover
+                state["text"] = hover_text
+                state["filled"] = True  # ghost：反实心
             btn.Invalidate()
 
         def _on_leave(sender, e):
             state["fill"] = fill
+            state["text"] = text_color
+            state["filled"] = pen is None
             btn.Invalidate()
 
         btn.Paint += _on_paint
@@ -1401,15 +1417,14 @@ def _build_close_dialog(owner=None, theme: str | None = None):
     )
     dialog.ClientSize = Size(WIDTH, HEIGHT)
 
-    # 窗口图标 = 品牌 logo（任务栏/Alt-Tab；按主题取线条版）
-    logo_bitmap = None
+    # 窗口图标 = 品牌 logo（任务栏/Alt-Tab；按主题取线条版）。
+    # 0.2.2 起标题栏内不再绘 logo（用户反馈：弹窗左上角不需要图标）
     icon_path = _brand_logo_path(theme)
     if icon_path:
         try:
-            logo_bitmap = Icon(icon_path).ToBitmap()
             dialog.Icon = Icon(icon_path)
         except Exception:  # noqa: BLE001 —— 图标加载失败不影响弹窗
-            logo_bitmap = None
+            pass
 
     def _on_form_paint(sender, e):
         """窗底：圆角填充 + 1px 描边（无边框窗没有系统边框可依）。"""
@@ -1451,23 +1466,12 @@ def _build_close_dialog(owner=None, theme: str | None = None):
     dialog.SizeChanged += _apply_round_region
     dialog.MouseDown += _start_drag
 
-    # ── 标题栏：品牌 logo（按主题取线条版）+ 标题 + 圆滑关闭键 ──
-    if logo_bitmap is not None:
-        logo = PictureBox()
-        logo.Image = logo_bitmap
-        logo.SizeMode = PictureBoxSizeMode.Zoom
-        logo.Size = Size(20, 20)
-        logo.Location = Point(22, 16)
-        logo.BackColor = _c("bg")
-        logo.AutoSize = False
-        logo.MouseDown += _start_drag
-        dialog.Controls.Add(logo)
-
+    # ── 标题栏：标题 + 圆滑关闭键（0.2.2 起不绘 logo）──
     title = WinLabel()
     title.Text = f"关闭 {APP_NAME}"
     title.AutoSize = False
     title.Size = Size(320, 24)
-    title.Location = Point(52, 15)
+    title.Location = Point(22, 15)
     title.Font = font_title
     title.ForeColor = _c("head")
     title.BackColor = _c("bg")
@@ -1506,9 +1510,9 @@ def _build_close_dialog(owner=None, theme: str | None = None):
     detail.BackColor = _c("bg")
     dialog.Controls.Add(detail)
 
-    # ── 按键：圆角纯色双色（两色分工动作性质）──
+    # ── 按键：主操作实心强调，退出走描边 ghost（hover 反实心）──
     btn_min = _round_button(
-        "最小化",
+        "最小化到托盘",
         DialogResult.Yes,
         BTN_X0,
         BTN_Y,
@@ -1523,9 +1527,11 @@ def _build_close_dialog(owner=None, theme: str | None = None):
         BTN_X0 + BTN_W + BTN_GAP,
         BTN_Y,
         font_button,
-        _c("danger_fill"),
+        _c("bg"),
         _c("danger_hover"),
-        _c("on_danger"),
+        _c("danger_fill"),
+        pen=_c("danger_fill"),
+        hover_text=_c("on_danger"),
     )
     dialog.Controls.Add(btn_min)
     dialog.Controls.Add(btn_quit)

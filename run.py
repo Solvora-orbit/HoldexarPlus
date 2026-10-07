@@ -1,4 +1,4 @@
-"""Holdexar 一键启动脚本。
+"""HoldexarPlus 一键启动脚本。
 
 流程：选解释器（缺 venv 自动创建）→ 补后端依赖 → 补随包资产
 （汇率档案种子 / Clash 内核与 GeoIP 数据，缺失则从上游取）→ 补前端依赖
@@ -8,9 +8,14 @@
 用法：
     python run.py                 # 桌面窗口模式（默认）
     python run.py --server        # 只起本地服务，不开窗口
-    python run.py --dev           # 对接 Vite 开发服务器（需另开终端 npm run dev）
+    python run.py --dev           # 免构建开发模式：自动拉起 Vite 热更新并接窗
     python run.py --build         # 强制重建前端后启动
     python run.py --port 18888    # 指定端口
+
+开发免构建说明（--dev）：不校验、不重建 web/dist，前端改动即时生效——
+    本机 8080 没有现成 Vite 就后台拉起一份（npm run dev，日志落
+    vite-dev.log），有就复用；窗口退出时收掉自己拉起的那份。
+    后端代码改动仍需重启本脚本（uvicorn 不在本脚本热重载范围）。
 """
 from __future__ import annotations
 
@@ -34,6 +39,8 @@ if str(SERVER_ROOT) not in sys.path:
 from app.core.app_info import APP_NAME, ENV_PREFIX  # noqa: E402
 
 DEFAULT_PORT = "28765"
+# Vite 开发服务器端口（与 web/vite.config.ts server.port 同源约定）
+VITE_PORT = 8080
 # 覆盖运行链关键面：Web 框架 / 数据层 / 调度 / 桌面壳
 REQUIRED_MODULES = ("fastapi", "uvicorn", "sqlalchemy", "aiohttp", "apscheduler", "webview")
 # 随包内核资产就位的判据（assets/clash/ 内的可执行文件，见 scripts/fetch_kernel.py）
@@ -139,10 +146,109 @@ def build_web() -> None:
         sys.exit("[错误] 前端构建失败（lint 门禁或编译错误），请向上翻日志。")
 
 
+def _vite_ready(port: int) -> bool:
+    """端口上是不是**真的 Vite**：dev 模式的 index.html 必带 @vite/client。
+
+    只测 TCP 连通会把占用者（如 Steam 客户端的本地服务）当成就绪——窗口
+    接上去是黑屏，用户无从理解；响应体特征识别才能区分。探测是本脚本自有
+    语义（连接自己拉起的本地 dev server）：host 为常量、端口做范围校验，
+    不存在外部可控的 URL 进入请求。"""
+    import http.client
+
+    if not isinstance(port, int) or not 1 <= port <= 65535:
+        return False
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=1.5)
+        conn.request("GET", "/")
+        body = conn.getresponse().read(8192).decode("utf-8", "replace")
+        conn.close()
+    except Exception:  # noqa: BLE001 —— 连不上/非 HTTP 都算「不是 Vite」
+        return False
+    return "@vite/client" in body
+
+
+def _new_vite_port(log_path: Path, offset: int) -> "int | None":
+    """从本次 spawn 之后追加的日志里解析 Vite 实际端口（strictPort 未开，
+    8080 被占时 vite 会自动换 8081+，DEV_URL 必须跟着实际值走）。"""
+    import re
+
+    try:
+        with log_path.open("r", encoding="utf-8", errors="replace") as f:
+            f.seek(offset)
+            text = f.read()
+    except OSError:
+        return None
+    # vite 即便输出重定向到文件也带 ANSI 转义，而且色码会插在正文中间
+    # （localhost: 与端口之间夹 \x1b[1m 这类序列——里面还带数字）：
+    # 显式跨过任意个「ESC[数字m」色码再取端口，取最后一次出现
+    m = re.findall(r"localhost:(?:\x1b\[\d+m|\s)*(\d{2,5})", text)
+    if not m:
+        return None
+    port = int(m[-1])
+    return port if 1 <= port <= 65535 else None
+
+
+def ensure_vite() -> tuple:
+    """--dev 免构建开发链：真 Vite 已在 8080 就复用；否则后台拉起一份。
+
+    返回 (proc, url)：proc 供退出时回收（复用别人开的返回 None），
+    url 是确认带 @vite/client 的开发服务器地址；拉不起/等不到返回
+    (proc|None, None)，调用方据此回退静态产物或报错。子进程输出落仓库根
+    vite-dev.log（不刷屏主终端，出错可查）。"""
+    import time
+
+    if _vite_ready(VITE_PORT):
+        print(f"[开发] 复用已在服务的 Vite（:{VITE_PORT}）")
+        return None, f"http://localhost:{VITE_PORT}"
+    ensure_npm()
+    if not NODE_MODULES.is_dir():
+        ensure_web_deps()
+    log_path = ROOT / "vite-dev.log"
+    offset = log_path.stat().st_size if log_path.is_file() else 0
+    log = open(log_path, "ab")  # noqa: SIM115 —— 交给子进程持有
+    print(f"[开发] 后台拉起 Vite 开发服务器（默认 :{VITE_PORT}，日志 vite-dev.log）...")
+    # Windows 上 PATH 里的 "npm" 实为 npm.cmd 批处理：显式解析带扩展名的
+    # 绝对路径即可 shell=False 直通参数列表（不借 cmd 解释，无注入面）
+    npm_cmd = shutil.which("npm") or "npm"
+    proc = subprocess.Popen(
+        [npm_cmd, "run", "dev"], cwd=str(WEB_ROOT),
+        stdout=log, stderr=subprocess.STDOUT,
+    )
+    for _ in range(75):  # 最多等 30s：vite 冷启通常 1-3s，留足 npm 开销
+        if proc.poll() is not None:
+            print("[警告] Vite 启动即退出，看 vite-dev.log")
+            return None, None
+        port = _new_vite_port(log_path, offset) or VITE_PORT
+        if _vite_ready(port):
+            print(f"[开发] Vite 就绪（:{port}）")
+            return proc, f"http://localhost:{port}"
+        time.sleep(0.4)
+    print("[警告] 等 30s Vite 未就绪；窗口将回退构建产物")
+    return proc, None
+
+
+def stop_vite(proc: "subprocess.Popen | None") -> None:
+    """回收自己拉起的 Vite：Windows 下 cmd 包装的 pid 需 taskkill /T
+    连 node 子树一起收，否则留孤儿占端口。"""
+    if proc is None or proc.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+            capture_output=True, check=False,
+        )
+    else:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=f"{APP_NAME} 一键启动")
     parser.add_argument("--server", action="store_true", help="无窗口模式，仅启动本地服务")
-    parser.add_argument("--dev", action="store_true", help="加载 Vite 开发服务器 http://localhost:8080")
+    parser.add_argument("--dev", action="store_true", help="免构建开发模式：自动拉起 Vite 热更新并接窗")
     parser.add_argument("--build", action="store_true", help="强制重建前端产物")
     parser.add_argument("--port", default=DEFAULT_PORT, help=f"服务端口（默认 {DEFAULT_PORT}）")
     args = parser.parse_args()
@@ -151,15 +257,33 @@ def main() -> None:
     ensure_deps(python)
     ensure_seed(python)
     ensure_kernel(python)
-    if args.build or not DIST_INDEX.is_file():
+    # --dev 免构建：走 Vite 源服务热更新，dist 存在与否无关；--build 仅对
+    # 非 dev 路径有意义（dev 下静默忽略并说明）
+    vite_proc = None
+    vite_url = None
+    if args.dev:
+        if args.build:
+            print("[开发] --dev 免构建，--build 被忽略")
+        vite_proc, vite_url = ensure_vite()
+    elif args.build or not DIST_INDEX.is_file():
         ensure_web_deps()
         build_web()
 
     env = os.environ.copy()
     env[f"{ENV_PREFIX}PORT"] = str(args.port)
-    if args.dev:
-        env[f"{ENV_PREFIX}DEV_URL"] = "http://localhost:8080"
-        print(f"[开发] 窗口将加载 {env[f'{ENV_PREFIX}DEV_URL']}（需确保 npm run dev 已运行）")
+    dev_ok = bool(args.dev and vite_url)
+    if args.dev and not dev_ok:
+        # Vite 没起来：有旧 dist 就退回静态产物（能看不能热更），都没有则明示出路
+        if DIST_INDEX.is_file():
+            print("[开发] Vite 未就绪，退回现有 web/dist 静态产物（无热更新）")
+        else:
+            sys.exit(
+                "[错误] --dev 需要 Vite（见 vite-dev.log），且没有可退回的 web/dist。\n"
+                "       先跑一次 python run.py --build 生成产物，或修复 npm 后重试。"
+            )
+    if dev_ok:
+        env[f"{ENV_PREFIX}DEV_URL"] = vite_url
+        print(f"[开发] 窗口将加载 {vite_url}（前端热更新，改代码即生效）")
 
     print(f"[启动] {APP_NAME} · http://127.0.0.1:{args.port} · Ctrl+C 退出")
     # 开发态防陈旧字节码：__pycache__ 缓存未失效时会加载到旧字节码导致启动即崩，
@@ -187,6 +311,8 @@ def main() -> None:
         print(f"\n[错误] 启动器异常退出（exit {e.returncode}）。")
         print("       可改用 python run.py --server 以无窗口模式启动本地服务排查。")
         sys.exit(e.returncode or 1)
+    finally:
+        stop_vite(vite_proc)  # 只收自己拉起的 Vite；复用别人开的不动
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 """关窗意图询问（desktop/main.py）单测：不出网、不弹真窗。
 
-点 X 弹二选一（「最小化」/「退出程序」，右上角 X = 留在窗口），不再静默
+点 X 弹二选一（「最小化到托盘」/「退出程序」，右上角 X = 留在窗口），不再静默
 隐藏到托盘（那会让用户以为退出了程序，进程却常驻后台
 继续占端口/跑调度）。按键文案是动作词，系统 MessageBox 出不了，故整窗自绘
 （无边框 + 自绘标题栏 + 圆角按键）。
@@ -331,9 +331,9 @@ def test_dialog_structure(monkeypatch):
     dialog, mapping = desktop._build_close_dialog(None)
 
     controls = _by_name(dialog.Controls.items)
-    assert set(controls) == {"最小化", "退出程序", "关闭"}, list(controls)
+    assert set(controls) == {"最小化到托盘", "退出程序", "关闭"}, list(controls)
 
-    min_btn, quit_btn = controls["最小化"], controls["退出程序"]
+    min_btn, quit_btn = controls["最小化到托盘"], controls["退出程序"]
     close_btn = controls["关闭"]
     assert min_btn.Size == quit_btn.Size
     assert min_btn.Location[1] == quit_btn.Location[1]
