@@ -46,6 +46,7 @@ const bundles: Partial<Record<MessageKey, string>> = {
   'bundles.humble.tierCount': '{n} games',
   'bundles.humble.tierHint': 'This tier gives you {n} games total, {m} added here',
   'bundles.humble.tierNewBadge': 'New here',
+  'bundles.humble.unlockAt': 'unlocks at {price}',
   'bundles.humble.ingestCount': '{n} ingesting',
   'bundles.humble.ingestStarted': 'Ingest round started (batched first crawl)',
   'bundles.humble.ingestDone': 'Ingest round finished',

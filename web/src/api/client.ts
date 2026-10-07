@@ -1525,11 +1525,13 @@ export interface HumblePendingGame {
   status: 'resolving' | 'ingesting'
 }
 
-/** 档位内游戏条目；isNew = 本档新增（累进清单里的标记，0.2.3） */
+/** 档位内游戏条目；isNew = 本档新增，unlockPriceCnyFen = 首次出现的档位价
+ * （最低解锁门槛，卡片角标免点选可辨价位，0.3.1） */
 export interface HumbleTierGame {
   title: string
   appid: number | null
   isNew?: boolean
+  unlockPriceCnyFen?: number | null
 }
 
 /** 价格档位（0.2.3 累进售卖语义）：games = 买这档实际拿到的全部游戏

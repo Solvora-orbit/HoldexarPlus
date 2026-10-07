@@ -439,7 +439,9 @@ async def _sync_bundle_detail(
 async def refresh_humble_bundles() -> dict:
     """列表 + 在售包详情全链路（每日调度与手动触发同入口，幂等）。
 
-    详情抓取范围：新包（updated_at 为空）与超 24h 的在售包；下架包不重抓。"""
+    详情抓取范围：新包（updated_at 为空）、超 24h 的在售包、**档位数据缺失的
+    在售包**（tiers_json 为空——0.2.2 前入库的存量包或 HB 页面结构切换期抓的
+    空结果，不补抓永远等不到下一轮 24h 阈值外的机会）；下架包不重抓。"""
     from app.crawler.utils import get_beijing_time_obj
 
     if _REFRESH_LOCK.locked():
@@ -466,6 +468,10 @@ async def refresh_humble_bundles() -> dict:
                             or_(
                                 HumbleBundle.updated_at.is_(None),
                                 HumbleBundle.updated_at < cutoff,
+                                # 档位数据缺失的在售包随时补抓（不等 24h 阈值）：
+                                # 存量包入库早于档位解析上线，HB 模板切换期抓回的
+                                # 空结果也被「有结果才覆盖」保护性保留为 NULL
+                                HumbleBundle.tiers_json.is_(None),
                             ),
                         )
                     )
@@ -721,14 +727,20 @@ async def bundle_detail(slug: str) -> dict | None:
                 x for x in (t.get("titles") or [])
                 if isinstance(x, str) and x not in seen and not seen.add(x)
             ]
-            news = [{"title": x, "appid": title_appid.get(x)} for x in new_titles]
+            # unlockPriceCnyFen：首次出现的档位价 = 拿到这款游戏的最低解锁
+            # 门槛（累进售卖下首现档即最低价），卡片角标免点击可辨价位
+            news = [
+                {"title": x, "appid": title_appid.get(x),
+                 "unlockPriceCnyFen": t.get("price_cny_fen")}
+                for x in new_titles
+            ]
             acc.extend(news)
             cutoff = len(acc) - len(news)  # 尾段 = 本档新增
             tiers_out.append({
                 "id": str(t.get("id") or f"t{idx}"),
                 "priceCnyFen": t.get("price_cny_fen"),
                 "isInitial": bool(t.get("is_initial")),
-                "newGames": news,
+                "newGames": [{"title": g["title"], "appid": g["appid"]} for g in news],
                 "newCount": len(news),
                 "count": len(seen),  # 累计：买这档一共拿多少款
                 "games": [

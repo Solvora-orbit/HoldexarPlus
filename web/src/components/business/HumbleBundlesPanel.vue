@@ -354,6 +354,10 @@ async function openBundle(b: HumbleBundleItem) {
               <span v-if="g.isNew" class="hb-tier-cell__new">
                 {{ t('bundles.humble.tierNewBadge') }}
               </span>
+              <!-- 解锁门槛角标（0.3.1）：该游首次出现的档位价，不点选也辨价位 -->
+              <span v-if="g.unlockPriceCnyFen != null" class="hb-tier-cell__unlock">
+                {{ t('bundles.humble.unlockAt', { price: formatCnyFen(g.unlockPriceCnyFen) }) }}
+              </span>
               <HlGameCard
                 v-if="g.appid != null && cardByAppid.has(g.appid)"
                 :game="cardByAppid.get(g.appid)!"
@@ -625,6 +629,22 @@ async function openBundle(b: HumbleBundleItem) {
   color: var(--ink-on-fill);
   font-size: 10px;
   font-weight: 700;
+  pointer-events: none;
+}
+/* 解锁门槛角标（0.3.1）：卡左下角标档位价，弱化不遮封面主体 */
+.hb-tier-cell__unlock {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  z-index: 1;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border-soft);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
 .hb-pending__row.is-inline {

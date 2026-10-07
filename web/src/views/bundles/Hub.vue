@@ -436,7 +436,9 @@ const monthCountLabel = computed(() =>
   flex-shrink: 0;
 }
 .hub-window {
-  width: 110px;
+  /* 宽度自适应内容：HlSelect 触发框固有宽约 170px，写死 110px 会溢出盖住右侧「立即抓取」按钮 */
+  width: auto;
+  min-width: 96px;
   flex-shrink: 0;
 }
 .hub-month {

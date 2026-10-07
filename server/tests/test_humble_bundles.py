@@ -235,6 +235,70 @@ async def test_refresh_upsert_price_and_assoc(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_refresh_refetches_missing_tiers_within_24h(monkeypatch):
+    """0.3.1 档位自愈：在售包 updated_at 很新（24h 内）但 tiers_json 为空
+    （存量包早于档位解析上线 / HB 模板切换期抓回空结果）→ 本轮刷新立即重抓
+    详情补档位；已有 tiers 的包不陪跑。"""
+    import asyncio as _a
+    from datetime import datetime
+
+    monkeypatch.setattr(humble, "_REFRESH_LOCK", _a.Lock())
+
+    now_dt = datetime(2026, 10, 7, 12, 0, 0)
+
+    async def fake_page(session, proxy, url):
+        if url.endswith("/games"):
+            return _listing_html()
+        return _detail_html("Alpha Pack" if SLUG_A in url else "Beta Pack")
+
+    async def fake_resolve(session, title, proxy):
+        return APP_A1
+
+    async def fake_proxy():
+        return None
+
+    async def no_sleep(_: float) -> None:
+        return None
+
+    async def fake_run_sequential(specs, **_):
+        return [{"id": 9}]
+
+    monkeypatch.setattr(humble, "_fetch_page", fake_page)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", fake_resolve)
+    monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run_sequential)
+    monkeypatch.setattr(humble, "_strategy_proxy", fake_proxy)
+    monkeypatch.setattr(humble.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(
+        "app.crawler.utils.get_beijing_time_obj", lambda: now_dt.replace(tzinfo=None)
+    )
+
+    # 预置：两包都是 1 小时前刚刷过（updated_at 在 24h 内），A 缺档位、B 有档位
+    async with get_session_factory()() as session:
+        session.add(HumbleBundle(
+            slug=SLUG_A, name="Alpha Pack", on_sale=True, game_count=1,
+            first_seen_at=now_dt, last_seen_at=now_dt,
+            updated_at=now_dt.replace(hour=11), tiers_json=None,
+        ))
+        session.add(HumbleBundle(
+            slug=SLUG_B, name="Beta Pack", on_sale=True, game_count=1,
+            first_seen_at=now_dt, last_seen_at=now_dt,
+            updated_at=now_dt.replace(hour=11),
+            tiers_json='[{"id": "initial", "price_cny_fen": 100, "header": "", "is_initial": true, "titles": ["Keep Me"]}]',
+        ))
+        await session.commit()
+
+    res = await humble.refresh_humble_bundles()
+    assert res["ok"] is True
+    # 只重抓缺档位的 A（done 列表里不含 B）
+    assert [d.get("slug") for d in res["details"]] == [SLUG_A]
+    async with get_session_factory()() as session:
+        a = await session.get(HumbleBundle, SLUG_A)
+        assert a.tiers_json and '"bt20"' in a.tiers_json, "A 档位已补抓落库"
+        b = await session.get(HumbleBundle, SLUG_B)
+        assert '"Keep Me"' in b.tiers_json, "B 档位未被触碰"
+
+
+@pytest.mark.asyncio
 async def test_bundle_detail_payload():
     """列表端点过滤在售包；详情端点返回包内游戏条目；未知 slug 返回 None。"""
     from datetime import datetime
@@ -386,12 +450,13 @@ async def test_detail_tiers_cumulative_payload():
     assert [t["id"] for t in tiers] == ["initial", "bt20"]
 
     # 累进清单：第 1 档 = 本档 1 款；第 2 档 = 第 1 档 + 本档新增（去重后 2 款）
+    # unlockPriceCnyFen = 首次出现的档位价（最低解锁门槛，卡片角标数据源）
     assert tiers[0]["games"] == [
-        {"title": "Matched Game", "appid": APP_A1, "isNew": True}
+        {"title": "Matched Game", "appid": APP_A1, "isNew": True, "unlockPriceCnyFen": 3353}
     ]
     assert tiers[1]["games"] == [
-        {"title": "Matched Game", "appid": APP_A1, "isNew": False},
-        {"title": "Missing Game", "appid": None, "isNew": True},
+        {"title": "Matched Game", "appid": APP_A1, "isNew": False, "unlockPriceCnyFen": 3353},
+        {"title": "Missing Game", "appid": None, "isNew": True, "unlockPriceCnyFen": 6706},
     ]
     assert tiers[0]["newGames"][0] == {"title": "Matched Game", "appid": APP_A1}
     assert tiers[0]["count"] == 1

@@ -62,6 +62,7 @@ const bundles = {
   'bundles.humble.tierCount': '共 {n} 款',
   'bundles.humble.tierHint': '买这档共能拿到 {n} 款，其中 {m} 款是本档新增',
   'bundles.humble.tierNewBadge': '本档新增',
+  'bundles.humble.unlockAt': '{price} 解锁',
   'bundles.humble.ingestCount': '收录中 {n} 款',
   'bundles.humble.ingestStarted': '已开始一轮收录（分批首爬）',
   'bundles.humble.ingestDone': '收录轮已结束',
