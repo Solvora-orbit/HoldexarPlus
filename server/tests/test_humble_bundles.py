@@ -236,9 +236,9 @@ async def test_refresh_upsert_price_and_assoc(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_refresh_refetches_missing_tiers_within_24h(monkeypatch):
-    """0.3.1 档位自愈：在售包 updated_at 很新（24h 内）但 tiers_json 为空
-    （存量包早于档位解析上线 / HB 模板切换期抓回空结果）→ 本轮刷新立即重抓
-    详情补档位；已有 tiers 的包不陪跑。"""
+    """0.3.1 档位自愈 + 0.3.2 欠账重试：updated_at 很新（24h 内）但
+    tiers_json 为空的包立即重抓补档位；档位齐但仍有「未放弃欠账条目」
+    （attempts<3）的包也重抓——解析/模糊规则升级后老数据吃到红利。"""
     import asyncio as _a
     from datetime import datetime
 
@@ -285,17 +285,28 @@ async def test_refresh_refetches_missing_tiers_within_24h(monkeypatch):
             updated_at=now_dt.replace(hour=11),
             tiers_json='[{"id": "initial", "price_cny_fen": 100, "header": "", "is_initial": true, "titles": ["Keep Me"]}]',
         ))
+        # B 档位齐全但挂着未放弃欠账 → 0.3.2 也要重抓
+        session.add(HumbleBundleGame(slug=SLUG_B, appid=None, title="Pending Debt", resolve_attempts=0))
         await session.commit()
 
     res = await humble.refresh_humble_bundles()
     assert res["ok"] is True
-    # 只重抓缺档位的 A（done 列表里不含 B）
-    assert [d.get("slug") for d in res["details"]] == [SLUG_A]
+    # A 缺档位、B 有欠账 → 都进重抓（updated_at 都在 24h 内）
+    assert {d.get("slug") for d in res["details"]} == {SLUG_A, SLUG_B}
     async with get_session_factory()() as session:
         a = await session.get(HumbleBundle, SLUG_A)
         assert a.tiers_json and '"bt20"' in a.tiers_json, "A 档位已补抓落库"
         b = await session.get(HumbleBundle, SLUG_B)
-        assert '"Keep Me"' in b.tiers_json, "B 档位未被触碰"
+        assert '"Second Game"' in b.tiers_json, "B 重抓后档位随页面刷新"
+        debt = (
+            await session.execute(
+                select(HumbleBundleGame).where(
+                    HumbleBundleGame.slug == SLUG_B, HumbleBundleGame.title == "Pending Debt"
+                )
+            )
+        ).scalars().first()
+        # B 页面无此条目 → 旧欠账行清理（新页面条目另行落行）
+        assert debt is None, "页面消失的欠账行清理"
 
 
 @pytest.mark.asyncio
@@ -580,6 +591,57 @@ async def test_scan_ingest_multi_batch_until_drained(monkeypatch):
     # 8 候选、批 2、轮上限 3 → 3 批 6 款，余额 2 留下拍
     assert res == {"ok": True, "candidates": 8, "queued": 6, "batches": 3, "remaining": 2}
     assert calls == [[990721, 990722], [990723, 990724], [990725, 990726]]
+
+
+def test_unesc_title():
+    """0.3.2 标题转义还原：页面切段不经过 JSON 解码，\\u0027 会原样入库
+    （A Juggler's Tale 关联永失败的根因）；畸形形态原样返回不炸。"""
+    assert humble._unesc("Juggler\\u0027s Tale") == "Juggler's Tale"
+    assert humble._unesc("A B") == "A B"
+    assert humble._unesc('bare " quote') == 'bare " quote'
+
+
+@pytest.mark.asyncio
+async def test_resolve_attempts_exhaust_marks_not_found(monkeypatch):
+    """0.3.2 非 Steam 标注：连续 3 轮解析失败 → 不再空转重试（storesearch
+    省额度），bundle_detail pending 状态升 not_found（抽屉如实标注）。"""
+    from datetime import datetime
+
+    now_dt = datetime(2026, 10, 7)
+    async with get_session_factory()() as session:
+        session.add(HumbleBundle(
+            slug=SLUG_A, name="Alpha Pack", on_sale=True, game_count=0,
+            first_seen_at=now_dt, last_seen_at=now_dt,
+        ))
+        await session.commit()
+
+    async def fake_page(session, proxy, url):
+        return _detail_html("Alpha Pack")
+
+    calls: list[str] = []
+
+    async def never_resolves(session_, title, proxy_):
+        calls.append(title)
+        return None
+
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(humble, "_fetch_page", fake_page)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", never_resolves)
+    monkeypatch.setattr(humble.asyncio, "sleep", no_sleep)
+
+    for _ in range(4):
+        async with get_session_factory()() as s:
+            bundle = await s.get(HumbleBundle, SLUG_A)
+        await humble._sync_bundle_detail(None, None, bundle, mark_updated=False)
+
+    # 第 4 轮不再尝试：只有前 3 轮各一次
+    assert len(calls) == 3, "尝试 ≥3 后不再拾取（不永远空转）"
+
+    d = await humble.bundle_detail(SLUG_A)
+    assert d is not None
+    assert [p["status"] for p in d["pending"]] == ["not_found"]
 
 
 @pytest.mark.asyncio

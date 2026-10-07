@@ -55,3 +55,7 @@ class HumbleBundleGame(Base):
     appid: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(300))
     # 下架包保留行（历史可查），on_sale 只挂在包行上
+    # storesearch 关联尝试计数（0.3.2）：≥3 轮仍解析不出 → 前端标「未找到」
+    # （大概率非 Steam 发行/GOG 独占/商店下架），停止空转重试；
+    # 关联成功的行不再触碰（欠账账本语义与 appid 列同源）
+    resolve_attempts: Mapped[int] = mapped_column(Integer, default=0)

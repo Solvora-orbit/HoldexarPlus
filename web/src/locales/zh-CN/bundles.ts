@@ -55,6 +55,7 @@ const bundles = {
   'bundles.humble.collapse': '收起列表',
   'bundles.humble.resolving': '关联中',
   'bundles.humble.ingesting': '收录中',
+  'bundles.humble.notFound': 'Steam 未找到（可能非 Steam 游戏）',
   'bundles.humble.tier': '第 {i} 档',
   'bundles.humble.tierMeta': '共含 {n} 款 · 本档新增 {m}',
   'bundles.humble.tierEmpty': '该档暂无可展示的游戏',

@@ -117,6 +117,22 @@ def _cny_to_fen(money: dict | None) -> int | None:
         return None
 
 
+def _unesc(s: str) -> str:
+    """还原页面内嵌 JSON 的转义序列（0.3.2）。
+
+    详情页条目按 machine_name 锚切段、image_text 用正则取原文——不经过
+    JSON 解码，`A Juggler\\u0027s Tale` 的 \\u0027（撇号）会原样入库：
+    既脏了显示名，也让 storesearch 查询词被转义串拆碎永远关联不上。
+    走一次 json 字符串解码；含裸引号等畸形形态解码失败时原样返回。"""
+    if "\\" not in s:
+        return s
+    try:
+        out = json.loads(f'"{s}"')
+        return out if isinstance(out, str) else s
+    except ValueError:
+        return s
+
+
 def _decode_at(text: str, brace_pos: int, opener: str, closer: str):
     """从锚点位起 raw_decode 一个 JSON 容器（页面文本里条目含嵌套花括号，
     手切不可靠；月包解析链同款做法）。"""
@@ -182,7 +198,7 @@ def _parse_game_items(html_text: str, bundle_name: str) -> dict[str, str]:
         if "steam" not in game:
             continue
         nm = _NAME_RE.search(seg)
-        title = (nm.group(1) if nm else "").strip()
+        title = _unesc((nm.group(1) if nm else "").strip())
         low = title.lower()
         if not title or low == lowered:
             continue
@@ -332,15 +348,19 @@ async def _sync_bundle_detail(
     async with get_session_factory()() as s:
         rows = (
             await s.execute(
-                select(HumbleBundleGame.title, HumbleBundleGame.appid).where(
-                    HumbleBundleGame.slug == bundle.slug
-                )
+                select(
+                    HumbleBundleGame.title, HumbleBundleGame.appid,
+                    HumbleBundleGame.resolve_attempts,
+                ).where(HumbleBundleGame.slug == bundle.slug)
             )
         ).all()
-    resolved_known = {t for t, a in rows if a is not None}
-    pending_known = {t for t, a in rows if a is None}
-    # 只解「新面孔 + 上轮欠账」；已有关联跳过（storesearch 省额度）
-    to_resolve = [t for t in titles if t not in resolved_known]
+    resolved_known = {t for t, a, _n in rows if a is not None}
+    pending_known = {t for t, a, _n in rows if a is None}
+    # 只解「新面孔 + 未放弃的欠账」；已有关联跳过（storesearch 省额度）。
+    # 尝试 ≥3 轮的欠账不再重试（0.3.2 非 Steam 标注）：GOG 独占/商店下架
+    # 之类永远解不出，空转每轮白烧一次查询；抽屉如实标「未找到」。
+    exhausted = {t for t, a, n in rows if a is None and int(n or 0) >= RESOLVE_MAX_ATTEMPTS}
+    to_resolve = [t for t in titles if t not in resolved_known and t not in exhausted]
 
     resolved: dict[str, int] = {}
     unresolved: list[str] = []
@@ -404,8 +424,24 @@ async def _sync_bundle_detail(
                 else:
                     s.add(HumbleBundleGame(slug=bundle.slug, appid=resolved[title], title=title))
             elif title not in existing:
-                # 未解析也落行（appid 留空）：外层计数 = 全部条目，欠账下轮重试
-                s.add(HumbleBundleGame(slug=bundle.slug, appid=None, title=title))
+                # 未解析也落行（appid 留空）：外层计数 = 全部条目，欠账下轮重试；
+                # 本轮已尝试过一次失败的直接记 1（0.3.2 尝试记账）
+                s.add(HumbleBundleGame(
+                    slug=bundle.slug, appid=None, title=title,
+                    resolve_attempts=1 if title in unresolved else 0,
+                ))
+        # 欠账尝试记账（0.3.2）：本轮解析失败且已有行 → attempts+1；
+        # 达到 RESOLVE_MAX_ATTEMPTS 后 to_resolve 不再拾取（above 过滤）
+        for title in unresolved:
+            if title in existing:
+                await s.execute(
+                    update(HumbleBundleGame)
+                    .where(
+                        HumbleBundleGame.slug == bundle.slug,
+                        HumbleBundleGame.title == title,
+                    )
+                    .values(resolve_attempts=HumbleBundleGame.resolve_attempts + 1)
+                )
         # 页面已消失的旧条目清理（仅删未解析欠账行；已有关联的保留历史）
         title_set = set(titles)
         stale_unresolved = [t for t in existing if t not in title_set and existing[t] is None]
@@ -440,8 +476,10 @@ async def refresh_humble_bundles() -> dict:
     """列表 + 在售包详情全链路（每日调度与手动触发同入口，幂等）。
 
     详情抓取范围：新包（updated_at 为空）、超 24h 的在售包、**档位数据缺失的
-    在售包**（tiers_json 为空——0.2.2 前入库的存量包或 HB 页面结构切换期抓的
-    空结果，不补抓永远等不到下一轮 24h 阈值外的机会）；下架包不重抓。"""
+    在售包**（tiers_json 为空——0.2.2 前入库的存量包或 HB 页面结构变动期抓的
+    空结果，不补抓永远等不到下一轮 24h 阈值外的机会）、**还有未放弃欠账
+    条目的包**（0.3.2：解析修复/模糊升级后老数据要吃到红利——档位已齐的包
+    若不再重抓，Disco Elysium 这类欠账会永远挂着）；下架包不重抓。"""
     from app.crawler.utils import get_beijing_time_obj
 
     if _REFRESH_LOCK.locked():
@@ -461,6 +499,17 @@ async def refresh_humble_bundles() -> dict:
             now = get_beijing_time_obj().replace(tzinfo=None)
             cutoff = datetime(now.year, now.month, now.day) - timedelta(hours=24)
             async with get_session_factory()() as s:
+                # 还有未放弃欠账条目的包也重抓（0.3.2）：解析/模糊规则升级后
+                # 老数据要吃到红利；attempts 到顶的「未找到」行不再拖着重抓
+                has_pending = (
+                    select(HumbleBundleGame.id)
+                    .where(
+                        HumbleBundleGame.slug == HumbleBundle.slug,
+                        HumbleBundleGame.appid.is_(None),
+                        HumbleBundleGame.resolve_attempts < RESOLVE_MAX_ATTEMPTS,
+                    )
+                    .exists()
+                )
                 stale = (
                     await s.execute(
                         select(HumbleBundle).where(
@@ -472,6 +521,7 @@ async def refresh_humble_bundles() -> dict:
                                 # 存量包入库早于档位解析上线，HB 模板切换期抓回的
                                 # 空结果也被「有结果才覆盖」保护性保留为 NULL
                                 HumbleBundle.tiers_json.is_(None),
+                                has_pending,
                             ),
                         )
                     )
@@ -503,6 +553,10 @@ async def start_refresh() -> dict:
 # 余额（或爬虫被占）留待下拍——候选判定是 games 行存在性，天然续跑
 _INGEST_BATCH = 200
 _INGEST_MAX_BATCHES = 10
+
+# storesearch 关联尝试上限（0.3.2 非 Steam 标注）：超过即放弃重试并在
+# 抽屉标「未找到」——GOG 独占/商店无此条目类永远解不出，别每轮空烧额度
+RESOLVE_MAX_ATTEMPTS = 3
 
 
 async def _queue_ingest(appids: list[int], source: str) -> int:
@@ -685,12 +739,13 @@ async def bundle_detail(slug: str) -> dict | None:
             return None
         rows = (
             await s.execute(
-                select(HumbleBundleGame.appid, HumbleBundleGame.title).where(
-                    HumbleBundleGame.slug == slug
-                )
+                select(
+                    HumbleBundleGame.appid, HumbleBundleGame.title,
+                    HumbleBundleGame.resolve_attempts,
+                ).where(HumbleBundleGame.slug == slug)
             )
         ).all()
-        appids = [int(a) for a, _ in rows if a is not None]
+        appids = [int(a) for a, _t, _n in rows if a is not None]
         # 有 appid 但 games 目录还没行的 = 首爬收录中
         have: set[int] = set()
         if appids:
@@ -700,9 +755,18 @@ async def bundle_detail(slug: str) -> dict | None:
                 )
             }
     pending = [
-        {"appid": int(a) if a is not None else None, "title": title,
-         "status": "ingesting" if a is not None and int(a) not in have else "resolving"}
-        for a, title in rows
+        {
+            "appid": int(a) if a is not None else None, "title": title,
+            # 三态（0.3.2）：解析放弃（尝试≥3 仍无果，大概率非 Steam 发行）
+            # > 已解析待目录收录（ingesting）> 关联欠账重试中（resolving）
+            "status": (
+                "not_found"
+                if a is None and int(n or 0) >= RESOLVE_MAX_ATTEMPTS
+                else "ingesting" if a is not None and int(a) not in have
+                else "resolving"
+            ),
+        }
+        for a, title, n in rows
         if a is None or int(a) not in have
     ]
     # 档位（0.2.2 存本档新增；0.2.3 展开累进售卖语义）：每档 games =
@@ -710,7 +774,7 @@ async def bundle_detail(slug: str) -> dict | None:
     # newGames/newCount 保留作「本档新增」小标。
     # 旧数据 tiers_json NULL → 空数组，前端回退平铺。
     title_appid: dict[str, int | None] = {}
-    for a, title in rows:
+    for a, title, _n in rows:
         title_appid.setdefault(title, int(a) if a is not None else None)
     tiers_out: list[dict] = []
     if bundle.tiers_json:

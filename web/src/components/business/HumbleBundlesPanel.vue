@@ -162,10 +162,17 @@ const pendingByTitle = computed(() => {
   for (const p of detailPending.value) m.set(p.title, p)
   return m
 })
+/** 非卡片条目状态 → 文案键（三态：收录中/关联中/未找到，0.3.2） */
+function humStatusKey(status: HumblePendingGame['status']): string {
+  if (status === 'ingesting') return 'bundles.humble.ingesting'
+  if (status === 'not_found') return 'bundles.humble.notFound'
+  return 'bundles.humble.resolving'
+}
+
 /** 档位组里没卡片的游戏行的状态文案键 */
 function rowStatusKey(title: string, appid: number | null): string {
   const p = pendingByTitle.value.get(title)
-  if (p) return p.status === 'ingesting' ? 'bundles.humble.ingesting' : 'bundles.humble.resolving'
+  if (p) return humStatusKey(p.status)
   return appid == null ? 'bundles.humble.resolving' : 'bundles.humble.ingesting'
 }
 /* 档位选择器（0.2.3，参照 HB 官网档位切换交互）：选中的档展示「买那档
@@ -364,11 +371,16 @@ async function openBundle(b: HumbleBundleItem) {
                 layout-mode="grid"
                 :enabled-regions="regionsStore.enabledCodes"
               />
-              <!-- 没卡片的游戏：轻量行（关联中/收录中状态行内标注） -->
-              <div v-else class="hb-pending__row is-inline">
-                <span class="hb-pending__dot" aria-hidden="true"></span>
-                <span class="hb-pending__name">{{ g.title }}</span>
-                <span class="hb-pending__status">{{ t(rowStatusKey(g.title, g.appid)) }}</span>
+              <!-- 没卡片的游戏：卡形占位（封面位+标题+状态），与真卡同格同形，
+                   单款档位不再塌成一条信息（0.3.2） -->
+              <div v-else class="hb-pending__card">
+                <div class="hb-pending__card-cover">
+                  <span class="hb-pending__card-glyph" aria-hidden="true">{{ g.title.slice(0, 1) }}</span>
+                </div>
+                <div class="hb-pending__card-body">
+                  <span class="hb-pending__card-name">{{ g.title }}</span>
+                  <span class="hb-pending__card-status">{{ t(rowStatusKey(g.title, g.appid)) }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -389,9 +401,7 @@ async function openBundle(b: HumbleBundleItem) {
           <li v-for="p in loosePending" :key="p.title" class="hb-pending__row">
             <span class="hb-pending__dot" aria-hidden="true"></span>
             <span class="hb-pending__name">{{ p.title }}</span>
-            <span class="hb-pending__status">
-              {{ t(p.status === 'ingesting' ? 'bundles.humble.ingesting' : 'bundles.humble.resolving') }}
-            </span>
+            <span class="hb-pending__status">{{ t(humStatusKey(p.status)) }}</span>
           </li>
         </ul>
         <HlEmpty v-if="!detailItems.length && !loosePending.length && !detailTiers.length" icon="" size="sm">
@@ -647,11 +657,44 @@ async function openBundle(b: HumbleBundleItem) {
   font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
-.hb-pending__row.is-inline {
+/* 卡形占位（0.3.2）：档位格里未入目录的条目与真卡同形同高 */
+.hb-pending__card {
+  display: flex;
+  flex-direction: column;
   border: 1px dashed var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow: hidden;
+  height: 100%;
+}
+.hb-pending__card-cover {
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
   background: var(--surface-inset);
-  padding: 10px 12px;
+}
+.hb-pending__card-glyph {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+.hb-pending__card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 12px 11px;
+}
+.hb-pending__card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hb-pending__card-status {
+  font-size: 11px;
+  color: var(--text-dim);
 }
 .hb-card__body {
   padding: 10px 12px 12px;

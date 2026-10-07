@@ -240,6 +240,11 @@ _TABLE_EXTRA_COLUMNS: dict[str, dict[str, str]] = {    "games": {
         # 价格档位 JSON（0.2.2）：NULL = 未解析过，API 侧回退无档位展示
         "tiers_json": "TEXT",
     },
+    # 包内条目关联尝试计数（0.3.2 非 Steam 标注）：≥3 轮 storesearch 解析
+    # 仍失败 → 抽屉标「未找到」（大概率非 Steam 发行），停止空转重试
+    "humble_bundle_games": {
+        "resolve_attempts": "INTEGER DEFAULT 0",
+    },
     # 价格周期的阶段时刻与生产统计（统计口径见 crawl/stats.py）：
     # 统计列全为 NULL = 本轮没留下统计（未收敛 / 进程中断）
     "price_cycles": {

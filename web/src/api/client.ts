@@ -1518,11 +1518,12 @@ export interface HumbleBundlesPayload {
   bundles: HumbleBundleItem[]
 }
 
-/** 详情抽屉里的非卡片条目（resolving=解析欠账，ingesting=目录收录中） */
+/** 详情抽屉里的非卡片条目（resolving=解析欠账，ingesting=目录收录中，
+ *  not_found=关联尝试已放弃（0.3.2，大概率非 Steam 发行）） */
 export interface HumblePendingGame {
   appid: number | null
   title: string
-  status: 'resolving' | 'ingesting'
+  status: 'resolving' | 'ingesting' | 'not_found'
 }
 
 /** 档位内游戏条目；isNew = 本档新增，unlockPriceCnyFen = 首次出现的档位价

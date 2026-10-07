@@ -39,6 +39,7 @@ const bundles: Partial<Record<MessageKey, string>> = {
   'bundles.humble.collapse': 'Collapse list',
   'bundles.humble.resolving': 'matching',
   'bundles.humble.ingesting': 'ingesting',
+  'bundles.humble.notFound': 'not found on Steam (likely non-Steam)',
   'bundles.humble.tier': 'Tier {i}',
   'bundles.humble.tierMeta': '{n} games total · {m} added here',
   'bundles.humble.tierEmpty': 'No games to show for this tier',

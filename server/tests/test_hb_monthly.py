@@ -128,6 +128,33 @@ def test_pick_appid_playtest_normalized():
     assert hb._pick_appid("Eldtest Escape Playtest", hits) == 444
 
 
+def test_pick_appid_prefix_subtitle_layer():
+    """0.3.2 前缀层：HB 惯用简称对准商店全称副标题（真实案例 Disco Elysium
+    → Disco Elysium - The Final Cut）；模糊层只认主游戏，原声/DLC 出局。"""
+    hits = [
+        {"name": "Disco Elysium - The Final Cut", "id": "546200", "type": "game"},
+        {"name": "Disco Elysium Complete Soundtrack", "id": "1", "type": "soundtrack"},
+    ]
+    assert hb._pick_appid("Disco Elysium", hits) == 546200
+    # 互为前缀方向也成立：HB 侧带全称、商店简称（少见但同源）
+    hits2 = [{"name": "Shogun Showdown", "id": "3", "type": "game"}]
+    assert hb._pick_appid("Shogun Showdown Samurai Edition", hits2) == 3
+    # 前缀必须词边界（后接空格）：disco 不得撞 discover...
+    hits3 = [{"name": "Discoverflow", "id": "9", "type": "game"}]
+    assert hb._pick_appid("Disco", hits3) is None
+
+
+def test_pick_appid_similarity_floor():
+    """0.3.2 相似层：冠词/标点差异 ≥0.8 才认（Juggler's Tale 案例），
+    阈值下宁缺勿猜；DLC 不参与模糊。"""
+    hits = [{"name": "A Juggler's Tale", "id": "1207170", "type": "game"}]
+    assert hb._pick_appid("Juggler's Tale", hits) == 1207170
+    hits2 = [{"name": "Totally Different Game", "id": "9", "type": "game"}]
+    assert hb._pick_appid("Disco Elysium", hits2) is None
+    hits3 = [{"name": "Big Paintcast 2 All Stuff DLC", "id": "77", "type": "dlc"}]
+    assert hb._pick_appid("Big Paintcast 2", hits3) is None
+
+
 def test_month_page_url_from_machine_name():
     assert hb._month_page_url("september_2026_choice") == \
         "https://www.humblebundle.com/membership/September-2026"
