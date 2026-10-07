@@ -29,18 +29,28 @@ TOLERANCE = 500  # 5 元（分）
 
 @pytest.fixture(autouse=True)
 def _require_populated_library():
-    """games 表为空时跳过（真实库用例，同步夹具内 skip 兼容性最好）。"""
+    """games 或现价表为空时跳过（真实库用例，同步夹具内 skip 兼容性最好）。
+
+    现价表判据防的是 2026-10 dev 事故形态：games 千行健在而
+    game_current_prices 被清零——只查 games 会整文件红成「代码回归」，
+    实际是数据缺失，skip 并点名表名。
+    """
     settings = get_settings()
     db_path = settings.data_dir / settings.db_filename
     con = sqlite3.connect(str(db_path))
     try:
         count = con.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+        priced = con.execute("SELECT COUNT(*) FROM game_current_prices").fetchone()[0]
+    except sqlite3.OperationalError:
+        count, priced = 0, 0
     finally:
         con.close()
     if count < 100:
         # 行数过少视为库处于测试/半清空状态（并行测试会话种合成行），
         # 真实库前提不成立，skip 而非误报
         pytest.skip(f"本地库 games 仅 {count} 行（数据已清空/测试种子中），真实库用例跳过")
+    if priced == 0:
+        pytest.skip("game_current_prices 为空（现价数据缺失，非代码回归），真实库用例跳过")
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -77,6 +87,29 @@ def _lowest_other(item: dict) -> int | None:
 async def _fetch(**kw):
     kw.setdefault("limit", 40)
     return await service.list_games(**kw)
+
+
+def _head_word() -> str:
+    """从真实库头行英文名取一个 ≥4 字母词形作搜索关键词。
+
+    库内容是动态的（硬编码 "portal" 在库内无 Portal 系游戏时误报红），
+    头行词形保证可命中；裸 sqlite3 读，不借 list_games 自举。
+    """
+    import re
+
+    settings = get_settings()
+    con = sqlite3.connect(str(settings.data_dir / settings.db_filename))
+    try:
+        row = con.execute(
+            "SELECT COALESCE(name_en, name) FROM games ORDER BY appid LIMIT 20"
+        ).fetchall()
+    finally:
+        con.close()
+    for (nm,) in row:
+        for w in re.split(r"[^A-Za-z]+", nm or ""):
+            if len(w) >= 4:
+                return w
+    raise AssertionError("库内前 20 行找不到 ≥4 字母英文词形")
 
 
 @pytest.mark.asyncio
@@ -169,10 +202,13 @@ async def test_region_locked_no_cn():
 
 @pytest.mark.asyncio
 async def test_search():
-    r = await _fetch(q="portal")
-    assert 0 < r["total"] < 100
-    assert all("portal" in (i["name"] or "").lower() or
-               "portal" in (i.get("nameEn") or "").lower() for i in r["items"])
+    """关键词检索命中且过滤生效（词形取自真实库存量行，见 _head_word）。"""
+    word = _head_word()
+    low = word.lower()
+    r = await _fetch(q=word)
+    assert r["total"] >= 1, f"库存量词形 {word!r} 应至少命中播种来源行"
+    assert all(low in (i["name"] or "").lower() or
+               low in (i.get("nameEn") or "").lower() for i in r["items"])
 
 
 @pytest.mark.asyncio

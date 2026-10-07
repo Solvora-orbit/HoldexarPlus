@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from app.core.database import get_session_factory, init_db
 from app.crawler.db_writer import MISSING_MAX_RETRIES, DbWriter
@@ -294,9 +294,23 @@ async def test_generate_missing_tasks_clears_empty_region_rows():
             await session.commit()
 
 
+async def _purge_app_rows(appid: int) -> None:
+    """夹具清理（ORM 删除形态）。"""
+    async with get_session_factory()() as session:
+        for r in (
+            await session.scalars(
+                select(GameCurrentPrice).where(GameCurrentPrice.appid == appid)
+            )
+        ).all():
+            await session.delete(r)
+        await session.commit()
+
+
 @pytest.mark.asyncio
-async def test_clear_missing_regions_deletes_only_missing():
-    """clear_missing_regions 只删 missing 状态行：ok 行与历史不动。"""
+async def test_clear_missing_regions_preserves_priced_rows():
+    """clear_missing_regions 两道收敛：ok 行不动；带旧价的 missing 转 blocked
+    且旧价保留（missing 契约「这次没拿到」不推翻「曾经拿到」——删带价行是
+    dev 库现价清零事故的直接成因）；无价 missing 痕迹行删除回到未观测。"""
     db = DbWriter()
     await db.clear_missing_regions([])  # 空表安全
 
@@ -310,13 +324,25 @@ async def test_clear_missing_regions_deletes_only_missing():
             row = await session.get(GameCurrentPrice, (APPID, "RU"))
         assert row is not None and row.price_status == "ok"
 
+        # 带旧价：ok→missing 标记后行上仍有价格事实 → 转 blocked，旧价原样存活
         await db.mark_region_status(APPID, "ru", "missing")
         cleared = await db.clear_missing_regions([(APPID, "ru")])
         assert cleared == 1
         async with get_session_factory()() as session:
             row = await session.get(GameCurrentPrice, (APPID, "RU"))
+        assert row is not None
+        assert row.price_status == "blocked"
+        assert row.price == 10000, "收敛不得销毁旧价"
+        assert row.attempt_outcome == "failed"
+
+        # 无价：从未成功观测的痕迹行 → 删除（出账本，回未观测）
+        async with get_session_factory()() as session:
+            session.add(_price(APPID, "AR", "missing", None))
+            await session.commit()
+        cleared = await db.clear_missing_regions([(APPID, "ar")])
+        assert cleared == 1
+        async with get_session_factory()() as session:
+            row = await session.get(GameCurrentPrice, (APPID, "AR"))
         assert row is None
     finally:
-        async with get_session_factory()() as session:
-            await session.execute(delete(GameCurrentPrice).where(GameCurrentPrice.appid == APPID))
-            await session.commit()
+        await _purge_app_rows(APPID)

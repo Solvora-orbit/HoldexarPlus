@@ -3,6 +3,7 @@
 每个 (appid, 区) 的最近一次抓取结果必须落在唯一写面（db_writer）：
 - 成功观察（含 locked / 无选项）：attempt_outcome=success + last_success_at 推进
 - 传输失败：attempt_outcome=failed，行上保留上一次成功价与 last_success_at
+- 门禁降级（ok 响应无价 = 坏数据）：与传输失败同口径 failed，旧价不洗
 - 连续穷尽转 blocked：仍是失败态，价照旧保留
 隔离：tmp 库 + get_session_factory 打桩，不出网不触生产库。
 """
@@ -155,6 +156,42 @@ async def test_failed_attempt_keeps_price_and_last_success(db):
     assert row.last_success_at == good_at
     assert row.price_status == "missing"
     assert row.fail_count == 1
+
+
+@pytest.mark.asyncio
+async def test_degraded_batch_row_keeps_price_and_fails_stamp(db):
+    """门禁降级（响应 ok 但解析无价）：走账本道——旧价与 last_success_at
+    不被洗掉，章盖 failed，欠账 bump 计数。坏数据不是 Steam 的答复，
+    不得伪装成成功观察覆写价格三件套。"""
+    now = datetime.now()
+    good_at = now - timedelta(hours=4)
+    async with db() as session:
+        session.add(Game(appid=APPID, name="g", created_at=now, updated_at=now))
+        session.add(GameCurrentPrice(
+            appid=APPID, region_code="CN", currency="CNY",
+            price=1000, original_price=2000, cny_fen=1000,
+            price_status="ok", attempt_outcome="success",
+            steam_answer="ok", last_success_at=good_at,
+            updated_at=good_at,
+        ))
+        await session.commit()
+
+    writer = DbWriter()
+    await writer.connect()
+    await writer.upsert_task_batch([
+        ({"appid": APPID, "name": "g", "type": "game"},
+         [_price_row("cn", "ok", price=None)]),
+    ])
+
+    row = await _get_row(db)
+    assert row is not None
+    assert row.price_status == "missing"
+    assert row.attempt_outcome == "failed"
+    assert row.price == 1000, "降级不洗旧价"
+    assert row.original_price == 2000
+    assert row.cny_fen == 1000
+    assert row.last_success_at == good_at, "坏数据不得推进成功时钟"
+    assert row.fail_count == 1, "降级计一次欠账"
 
 
 @pytest.mark.asyncio

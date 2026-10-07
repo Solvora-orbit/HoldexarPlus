@@ -74,6 +74,32 @@ _CURRENT_UPDATABLE = (
     "last_success_at",
 )
 
+# 账本道 SET（门禁降级行专用）：本次没拿到有效价格 ≠ 推翻了曾经拿到——
+# 只推进状态与观察章，价格列与 last_success_at 原样留在行上（读侧按
+# attempt_outcome!=success 把旧价带 stale 标记照常展示）。
+_CURRENT_LEDGER_UPDATABLE = (
+    "price_status",
+    "updated_at",
+    "attempt_outcome",
+)
+
+
+def _split_current_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """current 行按写道分流：(全量覆写道, 账本道)。
+
+    门禁降级（响应 ok 但解析无价 = 坏数据，不是 Steam 的答复）的行打
+    degraded 内部标：消费后剥键，绝不让非列键进 INSERT VALUES。
+    locked / no_options 等「Steam 明确答复」仍是全量道（成功观察覆写）。
+    """
+    full: list[dict] = []
+    ledger: list[dict] = []
+    for row in rows:
+        if row.pop("degraded", False):
+            ledger.append(row)
+        else:
+            full.append(row)
+    return full, ledger
+
 # 补抓账本参数：免费游戏 price=0 合法（parse_all_sub_prices is_free 路径），
 # 只有 status=ok 且 price=None 才是"成功响应里的坏数据"；连续补抓失败上限，
 # 超过即终态化（blocked），防止"该区根本无货"被当成可重试错误死磕。
@@ -372,6 +398,11 @@ class DbWriter:
                         "discount_end_ts": p.get("discount_end_ts"),
                         "updated_at": now_dt,
                         "steam_answer": p.get("steam_answer"),
+                        # 门禁降级标记（ok 响应无价 → missing）：写侧分流走
+                        # 账本道保旧价，落库前由 _split_current_rows 剥除
+                        "degraded": (
+                            status == "missing" and p.get("price_status", "ok") == "ok"
+                        ),
                     }
                 )
         # 每个区域选标准版写入 current：优先有价（ok+price 有值）行——
@@ -439,6 +470,7 @@ class DbWriter:
                     "discount_end_ts": p.get("discount_end_ts"),
                     "updated_at": now_dt,
                     "steam_answer": p.get("steam_answer"),
+                    "degraded": status == "missing" and raw_status == "ok",
                 }
             )
 
@@ -446,22 +478,57 @@ class DbWriter:
         # 含 locked / 无购买选项）。answer 缺省时按状态推导（导入 / 旧调用
         # 方路径不带显式 answer）。
         for row in current_batch:
-            row["attempt_outcome"] = "success"
-            row["last_success_at"] = row["updated_at"]
-            if not row.get("steam_answer"):
-                status = row["price_status"]
-                row["steam_answer"] = (
-                    "locked"
-                    if status == "locked"
-                    else "no_options"
-                    if status in ("missing", "blocked")
-                    else "free" if row.get("price") == 0 else "ok"
-                )
+            if row.get("degraded"):
+                # 门禁降级 = 本次尝试失败（与 mark_region_status 的 missing 同
+                # 口径）：failed 章、不推进 last_success_at、answer 留空；
+                # 写侧走账本道，旧价不进 SET 不被洗掉
+                row["attempt_outcome"] = "failed"
+                row["last_success_at"] = None
+                row["steam_answer"] = None
+            else:
+                row["attempt_outcome"] = "success"
+                row["last_success_at"] = row["updated_at"]
+                if not row.get("steam_answer"):
+                    status = row["price_status"]
+                    row["steam_answer"] = (
+                        "locked"
+                        if status == "locked"
+                        else "no_options"
+                        if status in ("missing", "blocked")
+                        else "free" if row.get("price") == 0 else "ok"
+                    )
 
         ok_regions = {
             row["region_code"] for row in current_batch if row["price_status"] == "ok"
         }
         return current_batch, history_batch, ok_regions, degraded_regions
+
+    async def _apply_current_rows(self, session, rows: list[dict]) -> None:
+        """current 活表两路分流写入（单款与批量共用，语义只此一份）。
+
+        全量道：成功观察（含 locked / 无选项的明确答复）——价格列随行覆写，
+        旧价被新事实取代。账本道：门禁降级行——只推进 price_status /
+        updated_at / attempt_outcome，价格列与 last_success_at 留旧值，
+        「这次没拿到」不推翻「曾经拿到」。
+        """
+        full, ledger = _split_current_rows(rows)
+        for group, updatable in (
+            (full, _CURRENT_UPDATABLE),
+            (ledger, _CURRENT_LEDGER_UPDATABLE),
+        ):
+            if not group:
+                continue
+            insert_cp = sqlite_insert(GameCurrentPrice)
+            for chunk in _chunks(group, _INSERT_CHUNK_ROWS):
+                await session.execute(
+                    insert_cp.values(chunk).on_conflict_do_update(
+                        index_elements=[
+                            GameCurrentPrice.appid,
+                            GameCurrentPrice.region_code,
+                        ],
+                        set_={c: getattr(insert_cp.excluded, c) for c in updatable},
+                    )
+                )
 
     async def upsert_game_and_prices(
         self,
@@ -529,16 +596,7 @@ class DbWriter:
                     )
 
                     if current_batch:
-                        insert_cp = sqlite_insert(GameCurrentPrice)
-                        await session.execute(
-                            insert_cp.values(current_batch).on_conflict_do_update(
-                                index_elements=[
-                                    GameCurrentPrice.appid,
-                                    GameCurrentPrice.region_code,
-                                ],
-                                set_={c: getattr(insert_cp.excluded, c) for c in _CURRENT_UPDATABLE},
-                            )
-                        )
+                        await self._apply_current_rows(session, current_batch)
 
                         # 补抓成功结转清账：本批有 ok 价的区 fail_count 归零
                         # （missing → 补抓成功 → 回 ok 的欠账闭环）
@@ -764,18 +822,8 @@ class DbWriter:
                             degraded_groups.setdefault(frozenset(degraded_regions), []).append(aid)
 
                     if all_current:
-                        insert_cp = sqlite_insert(GameCurrentPrice)
                         _tp = time.perf_counter()
-                        for chunk in _chunks(all_current, _INSERT_CHUNK_ROWS):
-                            await session.execute(
-                                insert_cp.values(chunk).on_conflict_do_update(
-                                    index_elements=[
-                                        GameCurrentPrice.appid,
-                                        GameCurrentPrice.region_code,
-                                    ],
-                                    set_={c: getattr(insert_cp.excluded, c) for c in _CURRENT_UPDATABLE},
-                                )
-                            )
+                        await self._apply_current_rows(session, all_current)
                         current_ms = _ms_since(_tp)
                         # 补抓成功结转清账：本批有 ok 价的区 fail_count 归零
                         # （missing → 补抓成功 → 回 ok 的欠账闭环）；按「区集合相同
@@ -1138,34 +1186,51 @@ class DbWriter:
             logger.error("记录异常状态失败: %s", e)
 
     async def clear_missing_regions(self, pairs: list[tuple[int, str]]) -> int:
-        """批量清除误标的 missing 现价行（只删 missing 状态行，历史不动）。
+        """误标 missing 行的账本收敛（按行上有没有价格事实分两道）。
 
         处理器对目标「看见了但不落价」的判定（非游戏类型、未发售、元数据
-        与库内原值双缺）意味着该区当前不存在可写的价格事实——批量失败整批
-        记 missing 时误标的行若不清，会成为补抓通道每拍重拾、永不收敛的
-        死账——每拍重拾、永不收敛。删除后回到「未观测」态：黄框消失、补抓不再
-        拾取，主轮/重探在事实变化后（发售/上线）自然写出真实状态行。
+        与库内原值双缺）意味着本轮写不出价格事实——这类行若不清，会成为
+        补抓通道每拍重拾、永不收敛的死账。收敛手段按行形态选：
+
+        - 无价行（price IS NULL，从未成功观测）→ 删除，回到「未观测」态：
+          黄框消失、补抓不再拾取，事实变化后（发售/上线）主轮自然写真实行。
+        - 带旧价的 missing 行 → 只转 blocked 终态，绝不删行。missing 契约
+          （mark_region_status / 读侧 stale 矩阵）刻意把上一次成功价留在行上
+          ——「这次没拿到」不推翻「曾经拿到」；删行等于销毁价格事实
+          （2026-10 dev 库现价清零事故的直接成因）。转 blocked 同样出补抓
+          账本（locked/blocked 不进补抓），旧价与观察三元组照常展示。
         """
         if not pairs:
             return 0
         try:
+            pair_cond = or_(
+                *[
+                    (GameCurrentPrice.appid == int(appid))
+                    & (GameCurrentPrice.region_code == cc.upper())
+                    for appid, cc in pairs
+                ]
+            )
             async with write_gate(WritePriority.BACKGROUND), get_session_factory()() as session:
-                result = await session.execute(
+                deleted = await session.execute(
                     delete(GameCurrentPrice).where(
-                        or_(
-                            *[
-                                (GameCurrentPrice.appid == int(appid))
-                                & (GameCurrentPrice.region_code == cc.upper())
-                                for appid, cc in pairs
-                            ]
-                        ),
+                        pair_cond,
                         GameCurrentPrice.price_status == "missing",
+                        GameCurrentPrice.price.is_(None),
                     )
                 )
+                flipped = await session.execute(
+                    update(GameCurrentPrice)
+                    .where(
+                        pair_cond,
+                        GameCurrentPrice.price_status == "missing",
+                        GameCurrentPrice.price.isnot(None),
+                    )
+                    .values(price_status="blocked")
+                )
                 await session.commit()
-                return int(result.rowcount or 0)
+                return int(deleted.rowcount or 0) + int(flipped.rowcount or 0)
         except Exception as e:
-            logger.error("清除 missing 行失败: %s", e)
+            logger.error("收敛 missing 行失败: %s", e)
             return 0
 
     async def mark_coming_soon(self, appid: int) -> None:
