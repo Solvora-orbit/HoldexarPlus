@@ -154,16 +154,20 @@ async def _resolve_steamid(raw: str) -> str:
 
     # vanity name 需要调用 Steam API（需要 API Key）
     if not re.match(r"^[a-zA-Z0-9_-]+$", vanity):
-        raise ValueError(f"无法识别的 Steam 标识符: {raw}")
+        raise ValueError(f"无法识别的 Steam 标识符: {vanity}")
 
     if not api_key:
         raise ValueError(
             "非好友码/SteamID64 输入需要先在「我」页配置 Steam Web API Key 才能解析自定义 URL"
         )
-    async with httpx.AsyncClient(timeout=15, proxy=await _strategy_proxy()) as client:
-        resp = await client.get(
+    from app.domains.family.service import _steam_get
+
+    try:
+        resp = await _steam_get(
             RESOLVE_VANITY_URL, params={"key": api_key, "vanityurl": vanity}
         )
+    except httpx.HTTPError as e:
+        raise ValueError(f"无法解析自定义 URL: {vanity}（Steam API 请求失败: {e}）") from e
     data = resp.json().get("response", {})
     if data.get("success") != 1 or not data.get("steamid"):
         raise ValueError(f"无法解析自定义 URL: {vanity}")
@@ -171,11 +175,15 @@ async def _resolve_steamid(raw: str) -> str:
 
 
 async def fetch_wishlist(steamid: str) -> list[dict]:
-    """返回 [{appid, added_at}]；私有/空返回 []。"""
-    async with httpx.AsyncClient(timeout=15, proxy=await _strategy_proxy()) as client:
-        resp = await client.get(WISHLIST_URL, params={"steamid": steamid})
-        resp.raise_for_status()
-        items = resp.json().get("response", {}).get("items", []) or []
+    """返回 [{appid, added_at}]；私有/空返回 []。
+
+    走 family._steam_get：代理优先 + SSL 证书降级重试（经 Clash/本机加速器时
+    严格校验必失败，与钱包/已购通道同规则）。
+    """
+    from app.domains.family.service import _steam_get
+
+    resp = await _steam_get(WISHLIST_URL, params={"steamid": steamid})
+    items = resp.json().get("response", {}).get("items", []) or []
     result = []
     for it in items:
         appid = it.get("appid")
@@ -224,18 +232,18 @@ async def fetch_owned_games_via_jwt(steamid: str, token: str) -> list[dict]:
 
 async def fetch_owned_games_via_key(steamid: str, api_key: str) -> list[dict]:
     """已购拉取（WebAPI Key 通道，历史路径）。401/403/网络错抛 OwnedFetchError。"""
+    from app.domains.family.service import _steam_get
+
     try:
-        async with httpx.AsyncClient(timeout=20, proxy=await _strategy_proxy()) as client:
-            resp = await client.get(
-                OWNED_URL,
-                params={
-                    "key": api_key,
-                    "steamid": steamid,
-                    "include_appinfo": 1,
-                    "include_played_free_games": 1,
-                },
-            )
-        resp.raise_for_status()
+        resp = await _steam_get(
+            OWNED_URL,
+            params={
+                "key": api_key,
+                "steamid": steamid,
+                "include_appinfo": 1,
+                "include_played_free_games": 1,
+            },
+        )
     except httpx.HTTPStatusError as e:
         raise OwnedFetchError(f"WebAPI Key 通道被拒（{e.response.status_code}）") from e
     except httpx.HTTPError as e:
@@ -433,7 +441,16 @@ async def sync_account(steamid: str, auto_crawl: bool = True) -> dict:
         if account is None:
             raise ValueError(f"账户不存在: {steamid}")
 
-        wishlist = await fetch_wishlist(steamid)
+        # 愿望单拉取：通道失败 ≠ 愿望单为空。失败时跳过愿望单覆写与反向
+        # 核对（wishlist 置空即天然不激活/不停用任何行），不连带崩掉本次
+        # 已购/persona 同步——与 owned 通道同款软失败语义。
+        wishlist: list[dict] = []
+        wishlist_error: str | None = None
+        try:
+            wishlist = await fetch_wishlist(steamid)
+        except (httpx.HTTPError, ValueError) as e:
+            wishlist_error = str(e)
+            logger.warning("愿望单拉取失败（%s），本次跳过愿望单覆写与反向核对", e)
 
         # 已购拉取：通道失败 ≠ 库空。失败时中断 owned 覆写（保留既有标记），
         # 否则会把全部 owned=True 静默清空；HTTP 200 + 空 games 才是"库空/私有"。
@@ -561,6 +578,7 @@ async def sync_account(steamid: str, auto_crawl: bool = True) -> dict:
     result = {
         "steamid": steamid,
         "wishlistCount": len(wishlist),
+        "wishlistError": wishlist_error,
         "ownedCount": len(owned),
         "ownedSource": owned_source if owned_error is None else None,
         "ownedError": owned_error,
@@ -571,8 +589,10 @@ async def sync_account(steamid: str, auto_crawl: bool = True) -> dict:
         "newOwnedAppids": new_owned_appids,
     }
     logger.info(
-        "同步 %s：愿望单 %d / 已购 %d（%s）/ 新增 %d（已购新增 %d）",
-        steamid, len(wishlist), len(owned),
+        "同步 %s：愿望单 %s / 已购 %d（%s）/ 新增 %d（已购新增 %d）",
+        steamid,
+        f"{len(wishlist)}" if wishlist_error is None else f"失败：{wishlist_error}",
+        len(owned),
         f"通道 {owned_source}" if owned_error is None else f"失败：{owned_error}",
         len(new_appids), len(new_owned_appids),
     )
