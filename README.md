@@ -6,7 +6,7 @@
 
 **本地 Steam 多区价格监控终端** —— Holdexar 独立分支 · 持续演进版
 
-[![Version](https://img.shields.io/badge/version-v0.2.2-orange)](../../releases)
+[![Version](https://img.shields.io/badge/version-v0.3.0-orange)](../../releases)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13%2B-blue?logo=python&logoColor=white)](https://www.python.org)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Vue 3](https://img.shields.io/badge/Frontend-Vue%203-42b883?logo=vuedotjs&logoColor=white)](https://vuejs.org)
@@ -47,6 +47,7 @@
 - **v0.2.0**（2026-10-07）：**转正式发布**。HB 捆绑包上线（商店在售包抓取 + 包内游戏比价）· Steam 捆绑包展示区 · HB 月包近一年启动自动补抓 · 侧栏品牌 logo 高清化 · 自动抓取页居中 · 版本号转 semver（plus 开发线完结）
 - **v0.2.1**（2026-10-07）：月包抓取窗口含当月可调（默认 6 期 / 上限 2 年）· HB 捆绑包条目计数一致 + 未收录自动补爬 · 新包 NEW 角标点开已读 · 抽屉拖宽记忆 · 包卡档期与列表收放 · 关闭弹窗图标清晰化
 - **v0.2.2**（2026-10-07）：关闭弹窗去左上图标、退出改描边按钮更克制 · `run.py --dev` / `dev.bat` 免构建开发模式（自动拉起 Vite 热更新，端口占用智能换）· fork 遗留死文件清理与文档对账
+- **v0.3.0**（2026-10-07）：**装好就能用**——默认策略改「直连优先」（本机有系统代理自动识别并采用；导入订阅自动切代理优先，手动选过的策略不覆盖）· 直连形态默认不随价格轮刷全量目录/特惠榜（省流量）· 连不上 Steam 时弹加速器配置建议 · 捆绑包档位改 HB 官网式档位选择器（点档看该档实得全部游戏）· 收录链轮内连续分批 + 新包优先 + 「收录中 N」一键立即收录 · 愿望单同步补齐 SSL 证书降级（代理环境不再崩）· 爬虫写侧价格保全（本次失败不推翻曾经拿到，修 dev 库现价清零事故）· AI 月度用量默认不设上限 · 领航员多余卡片折叠 · 日志页模块中文名 · mihomo 内核 v1.19.32
 
 **规划中**
 
@@ -71,7 +72,7 @@
 - 剩下的全由它自己来：每隔几小时把各区价格抓回来、按实时汇率折算成人民币、发现降价和历史新低；
 - 价格降到你的心理价位时，它自动发邮件提醒你。
 
-它是一个**绿色软件**：解压就能用，不需要安装、不需要注册账号、不需要懂任何技术。所有数据都存在你自己的电脑里，不连接任何云端服务器，也没有任何数据上报。没有代理也能用：路由策略选「直连」即可全程走本机网络。
+它是一个**绿色软件**：解压就能用，不需要安装、不需要注册账号、不需要懂任何技术。所有数据都存在你自己的电脑里，不连接任何云端服务器，也没有任何数据上报。没有代理也能用：默认策略就是「直连优先」，全程走本机网络（开着系统代理/加速器时自动识别采用）；导入订阅后自动切到代理优先。
 
 ## 三步上手
 
@@ -151,7 +152,7 @@ Windows 对未签名程序的标准提示，与病毒无关。点 **更多信息
 <details>
 <summary>没有代理能用吗？</summary>
 
-能。【网络】页把路由策略设为「直连」或「直连优先」，全部功能托管到你本机网络环境（有加速器/本地代理软件时它们的通道就是实际出口）；限速由程序统一约束，不会打爆你的网络。想更稳的全区抓取再接入自备 Clash 订阅。
+能。默认策略「直连优先」就是这条路径：全部功能托管到你本机网络环境（开着加速器/系统代理时自动识别采用）；限速由程序统一约束，不会打爆你的网络。导入自备 Clash 订阅后自动切换「代理优先」；爬取大面积连不上时会弹加速器配置建议。
 </details>
 
 <details>
@@ -224,7 +225,7 @@ v0.1.1-plus.2 起已修复（桌面壳持久化存储）。如果你用的是更
 | 后端 | FastAPI · SQLAlchemy(async) · APScheduler(25 个定时任务) · aiohttp 爬核 |
 | 前端 | Vue 3 · TypeScript · Vite · 自制 Hl\* 组件体系(深浅双主题 / 四套主题色 / 中英双语) |
 | 桌面 | pywebview(WebView2) · onedir 绿色包 · 单实例锁 · WebView2 偏好持久化 |
-| 网络 | 出网策略引擎(proxy_first / direct_only / direct_first / proxy_only，直连类策略统一本机托管) · 自备 Clash 订阅 · mihomo 内核与 GeoIP 数据随包内置 |
+| 网络 | 出网策略引擎(direct_first 默认 / proxy_first / direct_only / proxy_only，直连类本机托管 + 系统代理自动识别，导入订阅自动切代理) · 自备 Clash 订阅 · mihomo v1.19.32 内核与 GeoIP 数据随包内置 |
 | 认证 | 应用内账号密码登录直调 Steam IAuthenticationService；手动 Cookie 粘贴通道保留；凭据 AES-256-GCM 加密落库 |
 
 ### 业务主线
