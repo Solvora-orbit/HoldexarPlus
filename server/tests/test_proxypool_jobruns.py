@@ -614,3 +614,14 @@ async def test_task_count_is_planned_not_completed(tmp_data_dir, monkeypatch):
     assert row.status == jobruns.STATUS_INTERRUPTED
     # 计划数 ≠ 完成数：这正是中断作业应有的形状，不能被「凑平」
     assert row.task_count != row.success_count + row.error_count
+
+
+def test_direct_unreachable_hint_matrix():
+    """0.3.0 归因纯函数：直连形态 + connect/reset 占失败一半以上才给 hint；
+    池形态 / 无失败 / 失败主因非连接类 → 不给（前端建议弹窗只该在真直连困境出现）。"""
+    h = jobruns.direct_unreachable_hint
+    assert h({"connect": 8, "http_4xx": 1}, 9, "direct_first") == "direct_unreachable"
+    assert h({"reset": 3, "http_5xx": 2}, 5, "direct_only") == "direct_unreachable"
+    assert h({"connect": 4, "http_5xx": 9}, 13, "direct_first") is None
+    assert h({"connect": 9}, 9, "proxy_first") is None
+    assert h({}, 0, "direct_first") is None

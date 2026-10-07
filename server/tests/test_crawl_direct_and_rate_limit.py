@@ -197,11 +197,21 @@ async def test_start_job_without_runtime_refuses_to_start(db, monkeypatch):
     """受管爬取 fail closed：拿不到池 Runtime 就拒绝启动。
 
     静默退直连会把"池坏了"伪装成"爬取成功"，所以这里断言的是拒绝而不是放行。
+    显式钉 pool 策略（0.3.0 默认 direct_first 不查 lane——那是另一条合法路径，
+    由上方直连用例覆盖）。
     """
     import app.domains.proxypool.runtime as pp_runtime
+    import app.domains.settings.service as settings_service
     from app.domains.proxypool.runtime import RuntimeUnavailableError
 
     _crawl_env(monkeypatch)
+
+    async def _pool_value(key, default=None):
+        if key == "proxy.strategy":
+            return "proxy_first"
+        return default
+
+    monkeypatch.setattr(settings_service, "get_value", _pool_value)
     # 确定性：不看本机是否有池 Runtime，直接声明"不可用"
     monkeypatch.setattr(pp_runtime, "current_runtime_proxy_url", lambda _d=None: None)
 
@@ -220,10 +230,20 @@ async def test_start_job_without_runtime_refuses_to_start(db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_run_sequential_without_runtime_starts_nothing(db, monkeypatch):
-    """无池 Runtime 时每个 spec 都启动不了（不再整链放行直连）。"""
+    """无池 Runtime 时每个 spec 都启动不了（不再整链放行直连）。
+
+    显式钉 pool 策略（0.3.0 默认 direct_first 本就不查 lane）。"""
     import app.domains.proxypool.runtime as pp_runtime
+    import app.domains.settings.service as settings_service
 
     _crawl_env(monkeypatch)
+
+    async def _pool_value(key, default=None):
+        if key == "proxy.strategy":
+            return "proxy_first"
+        return default
+
+    monkeypatch.setattr(settings_service, "get_value", _pool_value)
     monkeypatch.setattr(pp_runtime, "current_runtime_proxy_url", lambda _d=None: None)
 
     async def _no_runtime(_session, _d, **_kw):
@@ -336,16 +356,24 @@ async def test_direct_strategy_crawls_without_pool(db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_direct_first_strategy_also_hosts_locally(db, monkeypatch):
-    """直连优先（direct_first）与直连同走本机托管形态：空池也不得报「没有可用出口」。
+    """直连优先（direct_first，0.3.0 默认）与直连同走本机托管形态：
+    空池也不得报「没有可用出口」。
 
-    历史 bug：容量规划只判了 direct_only，直连优先被错误地送进代理池 lane 计划，
-    空池即 fail-closed 报「代理池里暂时没有可用出口」——而其「失败换代理」通道
-    早已退役（test_network_failover），策略引擎对它返回 None 直连
-    （resolve_proxy_url），语义上就是直连形态，必须与 direct_only 同分支。"""
+    历史 bug：容量规划只判了 direct_only，直连优先被错误地送进代理池 lane
+    计划，空池即 fail-closed 报「代理池里暂时没有可用出口」——直连优先语义
+    就是直连形态（本用例另桩掉系统代理探测 = 本机没开系统代理），必须与
+    direct_only 同分支。"""
     import app.domains.proxypool.runtime as pp_runtime
     import app.domains.settings.service as settings_service
 
     _crawl_env(monkeypatch)
+
+    from app.domains.proxies import service as proxies_service
+
+    async def _no_sys_proxy() -> str | None:
+        return None
+
+    monkeypatch.setattr(proxies_service, "_system_proxy_url", _no_sys_proxy)
 
     async def _direct_value(key, default=None):
         if key == "proxy.strategy":
@@ -375,6 +403,43 @@ async def test_direct_first_strategy_also_hosts_locally(db, monkeypatch):
     cfg = captured[0]
     assert cfg.proxy_url is None and not cfg.proxy_urls, "直连形态不带任何代理"
     assert cfg.workers == crawl_service.DIRECT_MODE_WORKERS
+
+
+@pytest.mark.asyncio
+async def test_direct_first_injects_system_proxy(db, monkeypatch):
+    """0.3.0：direct_first 且注册表开了系统代理 → 爬取出口 = 系统代理单入口
+    （「有加速器/系统代理自动走系统代理」）。direct_only 无此行为（上一用例）。"""
+    import app.domains.settings.service as settings_service
+
+    _crawl_env(monkeypatch)
+
+    from app.domains.proxies import service as proxies_service
+
+    async def _sys_proxy() -> str | None:
+        return "http://127.0.0.1:7897"
+
+    monkeypatch.setattr(proxies_service, "_system_proxy_url", _sys_proxy)
+
+    async def _direct_value(key, default=None):
+        if key == "proxy.strategy":
+            return "direct_first"
+        return default
+
+    monkeypatch.setattr(settings_service, "get_value", _direct_value)
+
+    captured: list = []
+
+    async def _capture_run_crawl(pairs, *, config, stop_event=None, pre_tasks=None, crawl_job_id=None):
+        captured.append(config)
+        return {"total": len(pairs or []) + len(pre_tasks or []), "processed": 0}
+
+    monkeypatch.setattr(crawl_service, "run_crawl", _capture_run_crawl)
+
+    await crawl_service.start_job(scope="appids", appids=[998009], kind="scheduled")
+    assert crawl_service._active is not None, "direct_first + 系统代理：照常启动"
+    await crawl_service._active.task
+    assert captured
+    assert captured[0].proxy_url == "http://127.0.0.1:7897", "direct_first 走系统代理出口"
 
 
 @pytest.mark.asyncio

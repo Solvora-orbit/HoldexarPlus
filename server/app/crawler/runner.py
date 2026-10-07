@@ -179,6 +179,18 @@ async def run_crawl(
             # 「这次没跑完」是行级事实：手动停止与进程中断共用同一个标记，
             # 与启动清理写进去的那条保持同一语义（状态列仍是 interrupted）
             summary["interrupted"] = True
+        # 0.3.0 直连不可达归因：直连形态下失败以连接类（connect/reset）为主
+        # → 随 stats 带 hint，前端据此弹加速器配置建议（不改变作业行为）
+        from ..domains.settings.service import get_value as _get_setting
+
+        failed_n = int(stats.get("failed") or 0)
+        hint = jobruns.direct_unreachable_hint(
+            summary.get("by_error") or {},
+            failed_n,
+            await _get_setting("proxy.strategy", "direct_first"),
+        )
+        if hint:
+            stats["hint"] = hint
         status = jobruns.classify_outcome(
             int(stats.get("success") or 0),
             int(stats.get("failed") or 0),

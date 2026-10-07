@@ -768,6 +768,12 @@ async def test_bundles_path_injects_runtime_and_fails_closed(
     )
 
     # ③ crawl 域同样 fail closed
+    # 显式钉池形态：0.3.0 起默认策略是 direct_first（直连不查 lane，
+    # 由 test_crawl_direct 系列覆盖）；本段验的是 pool 形态 fail-closed
+    from app.domains.settings import service as _settings
+
+    await _settings.set_value("proxy.strategy", "proxy_first")
+
     async def _regions2(regions=None):
         return regions or ["us"]
 

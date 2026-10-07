@@ -153,6 +153,16 @@ def finalize_summary(summary: dict | None) -> dict:
     return out
 
 
+def direct_unreachable_hint(by_error: dict, failed: int, strategy: str) -> str | None:
+    """0.3.0 直连不可达归因：直连形态 + 失败以连接类为主（connect/reset 合计
+    占比 ≥ 一半）→ 返回 'direct_unreachable'（stats.hint），前端据此弹
+    加速器配置建议。纯函数便于单测与调用方解耦。"""
+    if failed <= 0 or strategy not in ("direct_only", "direct_first"):
+        return None
+    conn = int(by_error.get("connect") or 0) + int(by_error.get("reset") or 0)
+    return "direct_unreachable" if conn * 2 >= failed else None
+
+
 def classify_outcome(success_count: int, error_count: int, *, stopped: bool) -> str:
     """作业终态：**由后端一处定义**，前端不推导。
 

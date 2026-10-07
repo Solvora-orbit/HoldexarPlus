@@ -796,25 +796,33 @@ async def start_job(
 
     from app.domains.settings.service import get_value
 
-    if (await get_value("proxy.strategy", "proxy_first")) in ("direct_only", "direct_first"):
-        # 直连形态（direct_only 直连 / direct_first 直连优先）：价格作业**托管到
-        # 用户本机网络环境**——加速器 / Clash Verge 等本地代理的通道即实际出口，
-        # 池子状态与此形态无关（空池也能作业）。direct_first 的「失败换代理」通道
-        # 已随代理体系退役，策略引擎对它同样返回 None 直连（resolve_proxy_url），
-        # 因此必须与 direct_only 同走直连形态——否则直连优先用户会被错误地要求
-        # 代理池出口，空池即报「没有可用出口」（历史 bug：只判了 direct_only）。
+    strategy_now = await get_value("proxy.strategy", "direct_first")
+    if strategy_now in ("direct_only", "direct_first"):
+        # 直连形态（direct_only 强制直连 / direct_first 直连优先=0.3.0 默认）：
+        # 价格作业**托管到用户本机网络环境**——加速器 / Clash Verge 等本地
+        # 代理的通道即实际出口，池子状态与此形态无关（空池也能作业——绝不
+        # 要求代理池出口，历史 bug：只判了 direct_only）。direct_first 额外
+        # 识别系统代理（注册表 ProxyEnable）：开了就直接用它作单入口出口
+        # 「走系统代理」；direct_only 恒纯直连。
         # 频率由 crawler 的全局滑动窗口闸（200 发/5 分钟）统一约束，多 worker
         # 只是在闸前排队，不提高请求速率，因此 worker 数收在小额。
+        sys_proxy: str | None = None
+        if strategy_now == "direct_first":
+            from app.domains.proxies.service import _system_proxy_url
+
+            sys_proxy = await _system_proxy_url()
         effective_workers = min(planned_workers, DIRECT_MODE_WORKERS)
         logger.info(
             "[容量] 直连形态：作业托管到本机网络环境（加速器 / 本地代理的通道即实际出口）"
-            "| worker %d | 频率闸 200 发/5 分钟",
+            "| worker %d | 频率闸 200 发/5 分钟%s",
             effective_workers,
+            f" | 出口=系统代理 {sys_proxy}" if sys_proxy else "",
         )
         config = CrawlRunConfig(
             regions=effective,
             workers=effective_workers,
             timeout=HTTP_TIMEOUT,
+            proxy_url=sys_proxy,
         )
     else:
         from app.domains.proxies import clash_manager as _cm
@@ -898,23 +906,38 @@ async def default_queue_specs() -> list[dict]:
     - 常驻两段：欠账补抓（missing）→ 监控层（pool：有来源且未排除的对象，
       愿望单/关注按来源优先级排前）；
     - 目录层（catalog：games 主档减监控层）与特惠榜差值段（specials：榜单
-      翻页队列去重后的差集）随 KV `crawl.catalog_refresh`（默认开）决定是否
-      带上——关闭后只抓监控层，差值段是目录发现通道随之一并停；榜单源另受
-      KV `fetch.boards` 门控（在 specials scope 内判定）。
+      翻页队列去重后的差集）随 KV `crawl.catalog_refresh` 决定是否带上——
+      0.3.0 起三态：用户显式设置恒听；从未设置时按形态给默认（池形态开、
+      直连形态关，省流量：直连带宽下全量目录与特惠榜不随价格轮刷，只更
+      新关注与欠账）。关闭后只抓监控层，差值段是目录发现通道随之一并停；
+      榜单源另受 KV `fetch.boards` 门控（在 specials scope 内判定）。
 
     调度器 `_price_refresh_specs` 与 `start_full_queue` 都从这里取组成；
     新增/调整队列段只改本函数。
     """
-    from app.domains.settings.service import get_value
-
     specs: list[dict] = [
         {"kind": "missing"},
         {"scope": "pool"},
     ]
-    if await get_value("crawl.catalog_refresh", True):
+    if await catalog_refresh_effective():
         specs.append({"scope": "catalog"})
         specs.append({"scope": "specials", "kind": "specials_backfill"})
     return specs
+
+
+async def catalog_refresh_effective() -> bool:
+    """目录/特惠榜刷新的生效值（唯一判定口：队列组装与设置页显示共用）。
+
+    三态：KV 显式设置恒听；未设置时池形态默认开、直连形态默认关（0.3.0
+    省流量）。读 proxy.strategy 兜底与 get_strategy 默认保持一致。
+    """
+    from app.domains.settings.service import get_value
+
+    raw = await get_value("crawl.catalog_refresh", None)
+    if raw is not None:
+        return bool(raw)
+    strategy = await get_value("proxy.strategy", "direct_first")
+    return strategy not in ("direct_only", "direct_first")
 
 
 # 手动全队列链句柄：段间隙占用窗口（_active 已清、下一段未建）的防重入闸

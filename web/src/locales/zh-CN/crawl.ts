@@ -230,6 +230,14 @@ const crawl = {
   'crawl.kind.popularnewBackfill': '热门新品回补',
   'crawl.kind.specialsBackfill': '特惠榜回补',
   'crawl.kind.comingsoonBackfill': '即将推出回补',
+
+  /* ── 直连不可达建议弹窗（0.3.0）── */
+  'crawl.hint.title': '连不上 Steam',
+  'crawl.hint.body': '本轮爬取大量请求连不上 Steam（当前为直连形态）。可以：',
+  'crawl.hint.tip1': '开启本机加速器（Steam 加速器 / Clash Verge 等），软件退出后下次抓取自动识别系统代理',
+  'crawl.hint.tip2': '到「网络」页导入代理订阅——导入成功后会自动切换为代理优先，无需手动改策略',
+  'crawl.hint.tip3': '使用本应用自带 Clash 内核：「网络」页安装并启动内核即可',
+  'crawl.hint.goNetwork': '前往「网络」页',
 } as const
 
 export default crawl

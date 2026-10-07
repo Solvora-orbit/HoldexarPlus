@@ -220,6 +220,14 @@ const crawl: Partial<Record<MessageKey, string>> = {
   'crawl.kind.popularnewBackfill': 'New releases backfill',
   'crawl.kind.specialsBackfill': 'Specials backfill',
   'crawl.kind.comingsoonBackfill': 'Coming soon backfill',
+
+  /* Direct-connect unreachable hint (0.3.0) */
+  'crawl.hint.title': 'Cannot reach Steam',
+  'crawl.hint.body': 'Most requests failed to connect in this run (direct mode). You can:',
+  'crawl.hint.tip1': 'Start a local accelerator (Steam accelerator / Clash Verge) — the system proxy is picked up automatically on the next run',
+  'crawl.hint.tip2': 'Import a proxy subscription on the Network page — it switches to proxy-first automatically',
+  'crawl.hint.tip3': 'Or install and start the built-in Clash kernel on the Network page',
+  'crawl.hint.goNetwork': 'Open Network page',
 }
 
 export default crawl

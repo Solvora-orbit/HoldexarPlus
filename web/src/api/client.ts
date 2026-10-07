@@ -1511,6 +1511,10 @@ export interface HumbleBundleItem {
 export interface HumbleBundlesPayload {
   /** 刷新后台任务进行中（前端轮询） */
   running: boolean
+  /** 收录轮进行中（0.2.3 ingest-now） */
+  ingestRunning?: boolean
+  /** 目录收录欠账款数（0.2.3 面板「收录中 N」汇总） */
+  ingestPending?: number
   bundles: HumbleBundleItem[]
 }
 
@@ -1521,12 +1525,15 @@ export interface HumblePendingGame {
   status: 'resolving' | 'ingesting'
 }
 
-/** 价格档位（0.2.2）：newGames 为本档新增（累计语义），count = 买这档共含款数 */
+/** 档位内游戏条目；isNew = 本档新增（累进清单里的标记，0.2.3） */
 export interface HumbleTierGame {
   title: string
   appid: number | null
+  isNew?: boolean
 }
 
+/** 价格档位（0.2.3 累进售卖语义）：games = 买这档实际拿到的全部游戏
+ * （跨档去重累计，本档新增带 isNew），newGames/newCount 作「本档新增」辅助标 */
 export interface HumbleTier {
   id: string
   priceCnyFen: number | null
@@ -1534,6 +1541,7 @@ export interface HumbleTier {
   newGames: HumbleTierGame[]
   newCount: number
   count: number
+  games?: HumbleTierGame[]
 }
 
 export interface HumbleBundleDetailPayload extends Omit<HumbleBundleItem, 'isNew'> {
@@ -1554,6 +1562,9 @@ export const humbleApi = {
     request<{ ok: boolean }>('POST', `/humble/bundles/${encodeURIComponent(slug)}/seen`),
   /** 启动一轮刷新（后台任务立即返回；running 轮询 bundles 端点） */
   refresh: () => request<{ ok: boolean; started: boolean; running: boolean }>('POST', '/humble/refresh'),
+  /** 立即跑一轮目录收录（0.2.3；ingestRunning/ingestPending 轮询收尾） */
+  ingestNow: () =>
+    request<{ ok: boolean; started: boolean; running: boolean }>('POST', '/humble/bundles/ingest-now'),
 }
 
 // ─── watch pool（监控池：账户绑定 + 池条目。后端仍走 wishlist 域端点）─────
@@ -1733,7 +1744,8 @@ export interface CrawlJob {
   mode: string | null
   cycleId: number | null
   regions: string[] | null
-  stats: Record<string, number> | null
+  /** 作业统计（计数为 number；0.3.0 起含字符串 hint，如 direct_unreachable） */
+  stats: Record<string, unknown> | null
   startedAt: string | null
   finishedAt: string | null
   error: string | null
@@ -2825,6 +2837,8 @@ export interface HbChoiceGame {
   discount: number
   /** 非 CN 区最低 CNY 分（games.min_cny_fen 预计算列）；null = 无 */
   lowestCnyFen: number | null
+  /** 占位行待首爬（0.2.3：卡面「收录中」小标） */
+  pending?: boolean
 }
 
 export interface HbChoiceOffersPayload {

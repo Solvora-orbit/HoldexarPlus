@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import {
   crawlApi,
@@ -22,6 +23,21 @@ const fmt = useLocaleFormat()
 const crawl = useCrawlStatusStore()
 const regionsStore = useRegionsStore()
 const settingsStore = useSettingsStore()
+const router = useRouter()
+
+/* 0.3.0 直连不可达建议弹窗：后端归因（stats.hint=direct_unreachable，
+   直连形态且连接类失败占大头）→ 弹加速器/订阅指引；每个任务只弹一次 */
+const directHintOpen = ref(false)
+let directHintedJobId: number | null = null
+
+function checkDirectHint() {
+  const last = jobs.value.find((j) => j.status === 'failed' || j.status === 'done')
+  if (!last || last.id === directHintedJobId) return
+  if (last.stats?.hint === 'direct_unreachable') {
+    directHintedJobId = last.id
+    directHintOpen.value = true
+  }
+}
 
 const jobs = ref<CrawlJob[]>([])
 const loading = ref(false)
@@ -279,6 +295,7 @@ async function loadJobs() {
       ? []
       : [...(regionsStore.ownedRegions ?? [])]
     jobs.value = await crawlApi.jobs(30)
+    checkDirectHint()
     await loadActive()
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
@@ -897,6 +914,24 @@ onBeforeUnmount(() => {
       </div>
     </HlDialog>
 
+    <!-- 直连不可达建议（0.3.0）：直连形态爬取大面积连不上时给出网络出路 -->
+    <HlDialog v-model="directHintOpen" :title="t('crawl.hint.title')" :width="460">
+      <div class="dhint">
+        <p class="dhint__lead">{{ t('crawl.hint.body') }}</p>
+        <ul class="dhint__list">
+          <li>{{ t('crawl.hint.tip1') }}</li>
+          <li>{{ t('crawl.hint.tip2') }}</li>
+          <li>{{ t('crawl.hint.tip3') }}</li>
+        </ul>
+      </div>
+      <template #footer>
+        <HlButton size="sm" variant="text" @click="directHintOpen = false">{{ t('common.close') }}</HlButton>
+        <HlButton art="outline" tone="green" size="sm" @click="directHintOpen = false; router.push('/proxies')">
+          {{ t('crawl.hint.goNetwork') }}
+        </HlButton>
+      </template>
+    </HlDialog>
+
     <!-- 任务记录 -->
     <div class="card section-card" data-section="crawl.section.jobs">
       <div class="section-title">{{ t('crawl.section.jobs') }}</div>
@@ -1297,4 +1332,21 @@ onBeforeUnmount(() => {
 .fav-tut__link:hover {
   text-decoration: underline;
 }
+/* 直连不可达建议弹窗（0.3.0） */
+.dhint__lead {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.dhint__list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  list-style: disc;
+}
+
 </style>

@@ -61,8 +61,9 @@ async def test_fetch_settings_defaults_and_roundtrip(tmp_data_dir):
         "fx_auto": True,
         "fx_history": True,
         "price_interval_hours": 6,
-        # 目录层（未关注游戏 + 特惠榜差值段）默认随轮
-        "catalog_refresh": True,
+        # 0.3.0 三态：全新库未显式设置且默认策略 direct_first →
+        # 目录层生效值 = 关（直连省流量）；切池策略后自动回开
+        "catalog_refresh": False,
     }
 
     await update_fetch_settings(FetchSettingsUpdate(epic_free=False, fx_auto=False))
@@ -129,7 +130,8 @@ async def test_strategy_switches_roundtrip(tmp_data_dir):
     strategy = await proxies_service.get_strategy()
     assert strategy["autostart"] is False
     assert strategy["healthAuto"] is False
-    assert strategy["strategy"] == "proxy_first"  # 策略字段不受本次更新影响
+    # 策略字段不受本次更新影响（0.3.0 默认翻转为 direct_first：装好就能用）
+    assert strategy["strategy"] == "direct_first"
 
 
 @pytest.mark.asyncio

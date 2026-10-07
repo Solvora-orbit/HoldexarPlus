@@ -82,8 +82,8 @@ export const useCrawlStatusStore = defineStore('crawlStatus', () => {
       let startedTotal = 0
       for (const job of jobs) {
         if (job.cycleId !== cycle.id) continue
-        finishedDone += job.stats?.processed ?? 0
-        startedTotal += job.stats?.total ?? 0
+        finishedDone += Number(job.stats?.processed ?? 0)
+        startedTotal += Number(job.stats?.total ?? 0)
       }
       roundDone.value = finishedDone
       /* 分母 = 建轮冻结的轮批次总账与已启动段精确 count 的较大者：冻结预估

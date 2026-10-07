@@ -66,6 +66,10 @@ async def promote_subscription(subscription_id: int):
             raise HTTPException(status_code=409, detail=str(e)) from e
     # 事件在业务事务提交之后写：只有真的落库了的晋升才留痕（幂等空转不写）
     if result.promoted:
+        # 订阅出口就绪（0.3.0）：未手动选过策略则自动切 proxy_first
+        from app.domains.proxies import service as proxies_service
+
+        await proxies_service.notify_proxy_source_ready()
         await events.record(
             events.KIND_SUBSCRIPTION_PROMOTED,
             f"订阅 {result.subscription_id} 晋升 ACTIVE："

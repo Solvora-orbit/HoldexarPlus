@@ -153,6 +153,9 @@ async def add_proxy(req: ProxyAdd):
             )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    # 代理来源就绪（0.3.0）：未手动选过策略且还在直连类时自动切 proxy_first
+    if added:
+        await service.notify_proxy_source_ready()
     return {"added": len(added), "items": added}
 
 
@@ -354,6 +357,8 @@ async def clash_select(req: ClashSelect):
     if not any(s["id"] == req.subscriptionId for s in subs):
         raise HTTPException(status_code=404, detail="指定的订阅不存在")
     await service.remember_selected_clash_sub(req.subscriptionId)
+    # 点选了 Clash 订阅 = 有代理来源：未手动选过策略则自动切 proxy_first
+    await service.notify_proxy_source_ready()
     return {"selected": req.subscriptionId}
 
 
@@ -502,5 +507,9 @@ async def import_subscription(sub_id: int):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"订阅拉取失败: {e}")
+    # 导入有效订阅（0.3.0）：有节点进池/已在池即代理可用——未手动选过
+    # 策略则自动切 proxy_first
+    if (stats.get("added", 0) or stats.get("skipped", 0)) > 0:
+        await service.notify_proxy_source_ready()
     return stats
 

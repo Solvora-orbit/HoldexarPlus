@@ -171,9 +171,11 @@ async def _read_fetch_settings() -> FetchSettingsPayload:
         )
     except (TypeError, ValueError):
         pass
-    payload.catalog_refresh = bool(
-        await service.get_value("crawl.catalog_refresh", True)
-    )
+    # 显示「生效值」（0.3.0 三态）：用户从未显式设置时按形态给默认
+    # ——直连形态默认关（省流量）。与价格轮组装共用同一判定口。
+    from app.domains.crawl.service import catalog_refresh_effective
+
+    payload.catalog_refresh = await catalog_refresh_effective()
     return payload
 
 

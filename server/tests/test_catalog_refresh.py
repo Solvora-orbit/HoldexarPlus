@@ -20,6 +20,7 @@ from app.core.database import init_db
 from app.domains.games import boards as boards_mod
 from app.domains.games.models import Game
 from app.domains.monitoring.models import MonitorTarget
+from app.domains.settings import service as settings_service
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -29,6 +30,10 @@ async def _tmp_db(monkeypatch, tmp_path):
     database_module.get_engine.cache_clear()
     database_module.get_session_factory.cache_clear()
     await init_db()
+    # 本文件的既有用例语义是「池形态目录默认开」：0.3.0 起默认值三态化
+    # （未显式设置时随策略形态），显式把库钉到代理优先策略保持原前提；
+    # 三态本身由下方 test_catalog_tri_state 专测。
+    await settings_service.set_value("proxy.strategy", "proxy_first")
     yield
     database_module.get_settings.cache_clear()
     database_module.get_engine.cache_clear()
@@ -219,3 +224,24 @@ async def test_plan_and_resolve_share_one_exit():
         assert planned == resolved, scope
     assert await plan_scope_appids("appids", [42, 7]) == [42, 7]
     assert [a for a, _ in await resolve_scope_appids("appids", [42, 7])] == [42, 7]
+
+
+@pytest.mark.asyncio
+async def test_catalog_tri_state_follows_strategy_when_unset(monkeypatch):
+    """0.3.0 三态：`crawl.catalog_refresh` 从未显式设置时随策略形态给默认
+    （池形态开 / 直连形态关，直连省流量）；用户显式设置恒听。"""
+    from app.domains.crawl import service as crawl_service
+    from app.domains.settings.service import delete_value
+
+    # 未设置 + 池形态（fixture 已钉 proxy_first）：目录+特惠榜两段带上
+    await delete_value("crawl.catalog_refresh")
+    assert len(await crawl_service.default_queue_specs()) == 4
+
+    # 未设置 + 直连形态：只剩常驻两段（欠账 + 监控层）
+    await settings_service.set_value("proxy.strategy", "direct_first")
+    specs = await crawl_service.default_queue_specs()
+    assert len(specs) == 2, "直连形态默认不随价格轮刷全量目录/特惠榜"
+
+    # 显式设置恒听：直连形态下用户开了照刷
+    await settings_service.set_value("crawl.catalog_refresh", True)
+    assert len(await crawl_service.default_queue_specs()) == 4

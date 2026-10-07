@@ -1,14 +1,14 @@
 """proxies 域服务：代理池 CRUD / 健康检查 / 策略引擎 / 走线日志。
 
-策略（存 app_settings: proxy.strategy）：
-- proxy_first   代理优先（默认）：Clash 在跑走 Clash → 代理池轮询 → 本地
-                混合端口 → 直连
-- direct_only   直连：作业托管到用户本机网络环境——加速器 / Clash Verge 等
-                本地代理的通道即实际出口；价格作业在此形态下也走本机，
-                频率由 crawler 全局限流闸（200 发/5 分钟）统一约束
-- direct_first  直连优先（语义等同直连形态：其「失败换代理」通道已随代理体系
-                退役，策略引擎对它同样返回 None 直连——见 test_network_failover）
-- proxy_only    从启用代理轮询取一个用于整个任务
+策略（存 app_settings: proxy.strategy；0.3.0 起默认 direct_first）：
+- direct_first  直连优先（默认，「装好就能用」）：平时直连（本机加速器在
+                系统网络层透明生效）；注册表开了系统代理则自动改走系统代理
+- direct_only   强制直连：绕过一切代理探测（调试 / 本机代理白名单场景）
+- proxy_first   代理优先（导入有效订阅后自动切到此策略，除非用户手动选过）：
+                Clash 在跑 → 代理池轮询 → 本地混合端口 → 系统代理 → 直连
+- proxy_only    从启用代理轮询取一个用于整个任务；池空 fail-closed
+自动让位链：notify_proxy_source_ready 只在 proxy.strategy_manual 未置时
+把直连类策略切到 proxy_first——用户手动选过的策略永不被自动覆盖。
 """
 from __future__ import annotations
 
@@ -164,9 +164,11 @@ async def get_strategy() -> dict:
 
     strategy = await get_value("proxy.strategy", None)
     if strategy is None:
-        # 默认策略升级：Steam 域裸直连基本不可用（成功属侥幸），代理优先成为默认；
-        # 直连是显式选择（用户本机有加速器 / Clash Verge 等托管通道时选它）
-        strategy = "proxy_first"
+        # 0.3.0 默认翻转「装好就能用」：首开直连优先（本机有加速器/系统代理
+        # 时透明生效，且策略引擎会自动识别系统代理作出口——P2）；导入有效
+        # 订阅后自动切 proxy_first（notify_proxy_source_ready，用户手动选过
+        # 策略则不覆盖）。老用户库里已写的值原样保留，不受翻转影响。
+        strategy = "direct_first"
         await set_value("proxy.strategy", strategy)
         # 审计：正常新装也会走这里，但「库里值凭空消失」唯一可能来自数据目录
         # 漂移/换库——留痕（含数据目录）供「策略自己跳回默认」类问题排查。
@@ -208,8 +210,11 @@ async def set_strategy(
             raise ValueError(f"未知策略: {strategy}")
         old = await get_value("proxy.strategy", None)
         await set_value("proxy.strategy", strategy)
-        # 审计：策略没有「自动改写」路径，唯一非 UI 写入是上面的兜底/迁移；
-        # 留痕每次真实变更，出问题按日志即可闭环定位。
+        # 手动标记（0.3.0）：本入口 = UI 显式选择。之后导入订阅不再自动
+        # 改策略——用户选过的策略是主权决定，不被「便利」覆盖。
+        await set_value("proxy.strategy_manual", True)
+        # 审计：策略没有「自动改写」路径，唯一非 UI 写入是兜底/迁移与
+        # notify_proxy_source_ready（仅未手动时生效）；留痕每次真实变更。
         if old != strategy:
             logger.info("[策略] 变更 %s -> %s", old or "<缺省>", strategy)
     if clash_port is not None:
@@ -251,6 +256,101 @@ async def _clash_port_cached() -> int:
     return _clash_port_cache[1]
 
 
+def _read_registry_proxy() -> tuple[int, str]:
+    """读 IE/WinINet 代理注册表（HKCU…Internet Settings）。
+
+    返回 (ProxyEnable, ProxyServer)；非 Windows / 键缺失 / 异常一律 (0, "")
+    ——系统代理识别是增强路径，任何失败都静默走原有链路。
+    独立成函数便于测试打桩（winreg 只在真机存在）。
+    """
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+        ) as key:
+            enable, _ = winreg.QueryValueEx(key, "ProxyEnable")
+            try:
+                server, _ = winreg.QueryValueEx(key, "ProxyServer")
+            except OSError:
+                server = ""
+        return int(enable or 0), str(server or "")
+    except Exception:  # noqa: BLE001
+        return 0, ""
+
+
+def parse_system_proxy(server: str) -> str | None:
+    """把注册表 ProxyServer 值解析为 http://host:port。
+
+    两种真实形态：① 单一 `host:port`（Clash Verge 等托管工具常用）；
+    ② 分协议 `http=h:port;https=h:port;socks=…`（IE 手动配置）。
+    取 http/https 协议项（httpx/aiohttp 的 http 代理对两类请求通用）；
+    socks 项忽略（未装 socks 依赖，且 https 项通常同值）。无端口/畸形 → None。
+    """
+    s = (server or "").strip()
+    if not s:
+        return None
+    if "=" in s:
+        picked = ""
+        for part in s.split(";"):
+            k, _, v = part.partition("=")
+            if k.strip().lower() in ("http", "https") and v.strip():
+                picked = v.strip()
+                if k.strip().lower() == "https":
+                    break
+        s = picked
+    else:
+        s = s.split(";")[0].strip()
+    if not s or ":" not in s:
+        return None
+    host, _, port = s.rpartition(":")
+    host, port = host.strip(), port.strip()
+    if not host or not port.isdigit():
+        return None
+    return f"http://{host}:{port}"
+
+
+_sys_proxy_cache: tuple[float, "str | None"] | None = None
+
+
+async def _system_proxy_url() -> str | None:
+    """系统代理 URL（5s 缓存——注册表读廉价但每请求一次也没必要）。
+
+    缓存值含 None（「确认没有」也是结果）；ProxyEnable=0 视为未开。
+    """
+    global _sys_proxy_cache
+    now = time.monotonic()
+    if _sys_proxy_cache and now - _sys_proxy_cache[0] < 5:
+        return _sys_proxy_cache[1]
+    enable, server = _read_registry_proxy()
+    url = parse_system_proxy(server) if int(enable or 0) == 1 else None
+    _sys_proxy_cache = (now, url)
+    return url
+
+
+async def notify_proxy_source_ready() -> bool:
+    """有效代理来源就绪钩子（0.3.0 直连默认链的自动让位，幂等）。
+
+    调用时机：订阅导入成功 / Clash 订阅点选 / 添加单条代理 / 池订阅推广。
+    仅当用户从未手动选过策略（proxy.strategy_manual 未置）且当前是直连
+    类策略时才切换到 proxy_first；已手动选过的策略是主权决定，不覆盖。
+    返回是否发生了切换。"""
+    from app.domains.settings.service import get_value, set_value
+
+    if await get_value("proxy.strategy_manual", False):
+        return False
+    current = await get_value("proxy.strategy", None)
+    if current not in (None, "direct_only", "direct_first"):
+        return False
+    await set_value("proxy.strategy", "proxy_first")
+    logger.info(
+        "[策略] 代理来源就绪，自动切换 %s -> proxy_first（用户未手动选过策略）",
+        current or "<缺省直连>",
+    )
+    return True
+
+
 async def resolve_proxy_url() -> str | None:
     """策略引擎：为本次任务解析代理 URL。None = 直连。
 
@@ -258,16 +358,22 @@ async def resolve_proxy_url() -> str | None:
     """
     from app.domains.settings.service import get_value
 
-    strategy = await get_value("proxy.strategy", "proxy_first")
+    strategy = await get_value("proxy.strategy", "direct_first")
 
-    if strategy in ("direct_only", "direct_first"):
+    if strategy == "direct_only":
         return None
 
+    if strategy == "direct_first":
+        # 直连优先（0.3.0 起默认）：平时直连（本机加速器在系统网络层透明
+        # 生效）；但用户开了系统代理（注册表 ProxyEnable）说明全网都走
+        # 那扇门——直连形态同样要「走系统代理」而不是绕过它。识别不到
+        # 系统代理才真直连。
+        return await _system_proxy_url()
+
     if strategy == "proxy_first":
-        # 代理优先（2026-09 起默认）：Clash 内核在跑 → 内核端口；
+        # 代理优先：Clash 内核在跑 → 内核端口；
         # 代理池有启用节点 → 轮询；都没有 → 探本地混合端口（用户自启的
-        # Verge/Clash 不在本服务管辖内，但 steam 域直连基本不可用，
-        # 活着的本地代理永远优于直连兜底）；仍无 → 直连。
+        # Verge/Clash 不在本服务管辖内）；再探系统代理；仍无 → 直连。
         status = clash_manager.runtime.status()
         if status["running"] and status.get("port"):
             return f"http://127.0.0.1:{status['port']}"
@@ -277,7 +383,7 @@ async def resolve_proxy_url() -> str | None:
         if await _local_clash_alive():
             port = await get_value("proxy.clash_port", 7890)
             return f"http://127.0.0.1:{port}"
-        return None
+        return await _system_proxy_url()
 
     # proxy_only: 加权随机（延迟+健康反馈到流量分配；rr_index 顺序轮询兜底）
     enabled = await list_proxies(enabled_only=True)
