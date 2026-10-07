@@ -140,21 +140,70 @@ onBeforeUnmount(() => {
   source = null
 })
 
-/* ── 行结构着色：`时间 [级别] logger: 消息` ── */
+/* ── 行结构人话化（0.3.0）：`时间 [级别] logger: 消息` 拆段呈现，
+   模块名给中文标签；缓冲仍是原始行（复制全部/SSE 续播的事实源不变） ── */
 
-function levelOf(line: string): 'error' | 'warning' | 'info' {
-  if (line.includes('[ERROR]') || line.includes('[CRITICAL]')) return 'error'
-  if (line.includes('[WARNING]')) return 'warning'
+const LINE_RE = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \[(\w+)\] ([\w.]+): ([\s\S]*)$/
+
+/** logger 模块前缀表（最长前缀优先；表外模块原样显示） */
+const MOD_PREFIXES = [
+  'app.domains.proxypool', 'app.domains.proxies', 'app.domains.pilot', 'app.domains.agent',
+  'app.domains.wishlist', 'app.domains.crawl', 'app.domains.games', 'app.domains.rates',
+  'app.domains.alerts', 'app.domains.humble', 'app.domains.metadata', 'app.domains.account',
+  'app.domains.monitoring', 'app.domains.steam_events', 'app.domains.achievements',
+  'app.domains.family', 'app.domains.bills', 'app.domains.redeem', 'app.domains.regions',
+  'app.domains.settings', 'app.domains.system', 'app.domains.notifications',
+  'app.crawler', 'app.core.scheduler', 'app.core.database', 'app.core.updater',
+  'app.core.events', 'app.core.backup', 'app.core.seed_assets', 'app.core.orchestration',
+  'app.core.config', 'app.core.logging', 'app.core.keyring', 'app.core.paths',
+  'desktop', 'app.main', 'run', 'app',
+]
+
+function levelTag(tag: string): 'error' | 'warning' | 'info' {
+  if (tag === 'ERROR' || tag === 'CRITICAL') return 'error'
+  if (tag === 'WARNING') return 'warning'
   return 'info'
 }
+
+function moduleLabel(name: string): string {
+  for (const p of MOD_PREFIXES) {
+    if (name === p || name.startsWith(p + '.')) {
+      // 动态拼 key：i18n 门禁不判动态引用；缺词条回退原始模块名
+      const key = `logs.mod.${p}`
+      const hit = (t as (k: string) => string)(key)
+      return hit === key ? name : hit
+    }
+  }
+  return name
+}
+
+interface ParsedLine {
+  ts: string
+  level: 'error' | 'warning' | 'info'
+  mod: string
+  msg: string
+  raw: string
+}
+
+/** parsed：渲染投影。非匹配行（traceback 续行等）继承上一行级别、整行作消息。 */
+const parsed = computed<ParsedLine[]>(() => {
+  let lastLevel: ParsedLine['level'] = 'info'
+  return lines.value.map((line) => {
+    const m = LINE_RE.exec(line)
+    if (m) {
+      lastLevel = levelTag(m[2])
+      return { ts: m[1], level: lastLevel, mod: moduleLabel(m[3]), msg: m[4], raw: line }
+    }
+    return { ts: '', level: lastLevel, mod: '', msg: line, raw: line }
+  })
+})
 
 const levelCount = computed(() => {
   let error = 0
   let warning = 0
-  for (const line of lines.value) {
-    const lv = levelOf(line)
-    if (lv === 'error') error += 1
-    else if (lv === 'warning') warning += 1
+  for (const l of parsed.value) {
+    if (l.level === 'error') error += 1
+    else if (l.level === 'warning') warning += 1
   }
   return { error, warning }
 })
@@ -198,9 +247,17 @@ const levelCount = computed(() => {
       <div v-if="lines.length === 0" class="logs-empty">
         {{ t('logs.empty') }}
       </div>
-      <div v-for="(line, i) in lines" :key="i" class="logs-line" :class="`is-${levelOf(line)}`">{{
-        line
-      }}</div>
+      <div
+        v-for="(l, i) in parsed"
+        :key="i"
+        class="logs-line"
+        :class="`is-${l.level}`"
+        :title="l.raw"
+      >
+        <span v-if="l.ts" class="logs-line__ts">{{ l.ts }}</span>
+        <span v-if="l.mod" class="logs-line__mod">{{ l.mod }}</span>
+        <span class="logs-line__msg">{{ l.msg }}</span>
+      </div>
     </div>
   </section>
 </template>
@@ -284,6 +341,29 @@ const levelCount = computed(() => {
      不抢滚动（见 push），选完一段不会被滚走 */
   cursor: text;
   user-select: text;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+/* 分段呈现（0.3.0 人话化）：时间弱化、模块名做标签、消息吃剩余宽度 */
+.logs-line__ts {
+  color: var(--text-dim);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.logs-line__mod {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--surface-inset);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.logs-line__msg {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .logs-line.is-warning {
