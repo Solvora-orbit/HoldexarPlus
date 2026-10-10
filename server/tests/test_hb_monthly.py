@@ -155,30 +155,19 @@ def test_pick_appid_similarity_floor():
     assert hb._pick_appid("Big Paintcast 2", hits3) is None
 
 
-def test_edition_words_expanded():
-    """0.4.1 版本词表扩充（GMG/F 站实测案例）：Premium/Legendary 等剥离后
-    clean 层对准本体；Digital Deluxe 整体剥不残词。"""
-    assert hb._clean_name("Injustice 2 Legendary Edition") == "injustice 2"
-    assert hb._clean_name("Batman: Arkham Knight Premium Edition") == "batman arkham knight"
-    assert hb._clean_name("Melobot - A Last Song - Digital Deluxe Edition") == "melobot a last song"
-    # 五级匹配配合：premium 变体经 clean 层直接命中本体
-    hits = [{"name": "Batman: Arkham Knight", "id": "208650"}]
-    assert hb._pick_appid("Batman: Arkham Knight Premium Edition", hits) == 208650
-    # 修饰词在中间（Golden Train Edition）不剥：prefix 层对准本体
-    hits2 = [{"name": "Steam: Rails to Riches", "id": "758030"}]
-    assert hb._pick_appid("Steam: Rails to Riches - Golden Train Edition", hits2) == 758030
-
-
-def test_query_terms_edition_stripped_tier():
-    """0.4.1 查询词链插档：整名 → 剥版本词整名 → 主标题段 → 降词。
-    Batman 案例的剥词档必中本体位（storesearch 整名实测空）。"""
-    terms = hb._query_terms("Batman: Arkham Knight Premium Edition")
-    assert terms[0] == "Batman Arkham Knight Premium Edition"
-    assert "Batman Arkham Knight" in terms  # 剥版本词档
-    assert "Batman" in terms  # 主标题段（冒号前）
-    # 无版本词的标题不插重复档
-    plain = hb._query_terms("Dreamscaper")
-    assert plain == ["Dreamscaper"]
+def test_edition_suffix_kept():
+    """0.4.2 撤回 0.4.1 的版本词扩充与查询剥词档：带版本后缀的条目可能是
+    **独立的 Steam 捆绑包/DLC SKU**（如某些 Complete Edition 是合辑商品），
+    剥掉后缀会把它错对到本体——后缀保留在匹配形态里，对不上就留欠账。"""
+    # 0.4.1 扩词的四个词（premium/legendary/golden/enhanced/digital deluxe）不再剥
+    assert hb._clean_name("Injustice 2 Legendary Edition") == "injustice 2 legendary edition"
+    assert hb._clean_name("Batman: Arkham Knight Premium Edition") == "batman arkham knight premium edition"
+    assert hb._query_terms("Batman: Arkham Knight Premium Edition") == [
+        "Batman Arkham Knight Premium Edition", "Batman", "Batman Arkham",
+    ]
+    # 0.3.2 基线词表仍在（用户当年验证过的行为不动）
+    assert hb._clean_name("Melobot - A Last Song - Digital Deluxe Edition") == "melobot a last song digital"
+    assert hb._clean_name("Forza Horizon 5: Premium Edition") == "forza horizon 5 premium edition"
 
 
 def test_month_page_url_from_machine_name():
