@@ -52,6 +52,8 @@ class GmgBundleGame(Base):
         String(200), ForeignKey("gmg_bundles.slug", ondelete="CASCADE"), index=True
     )
     appid: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    # Steam 捆绑包引用（0.5.0）：检索兜底未命中 app 却命中 bundle 时落引用
+    bundle_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     title: Mapped[str] = mapped_column(String(300))
     # 统一检索引擎关联尝试计数：≥RESOLVE_MAX_ATTEMPTS → 前端标「未找到」
     resolve_attempts: Mapped[int] = mapped_column(Integer, default=0)

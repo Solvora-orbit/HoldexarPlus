@@ -34,6 +34,21 @@ const settings = {
   'settings.section.tour': '新手教程',
   'settings.section.appearance': '外观',
   'settings.section.help': '帮助与诊断',
+  'settings.section.experimental': '实验性功能',
+
+  /* ── 实验性功能（0.5.0）：总开关默认关，开启须风险确认 ── */
+  'settings.experimental.desc':
+    '开启后侧栏出现实验分区（当前含 Steampy 行情）。实验功能为前瞻尝试：数据来自公开页面透传、可能不稳定或随站点改版失效，不构成任何购买建议。',
+  'settings.experimental.toggle': '实验性功能',
+  'settings.experimental.toggleHint': '默认关闭；开启后侧栏「更多」组出现 Steampy 行情实验页',
+  'settings.experimental.dialogTitle': '开启实验性功能',
+  'settings.experimental.risk1': '实验功能的数据来自第三方网站公开页面的透传，可用性不受本应用保证，可能随时失效。',
+  'settings.experimental.risk2': '实验功能不参与自动抓取与提醒体系，仅作人工浏览参考。',
+  'settings.experimental.risk3': '后续实验功能会随此开关一并开启，随时可在本页关闭。',
+  'settings.experimental.consent': '我已了解上述风险，愿意开启实验性功能',
+  'settings.experimental.confirm': '开启',
+  'settings.experimental.enabledToast': '实验性功能已开启：侧栏「更多」组出现实验页',
+  'settings.experimental.disabledToast': '实验性功能已关闭：实验页入口已隐藏',
 
   /* ── 外观（主题色方案）── */
   'settings.appearance.desc': '强调色会应用到按钮、链接、图表与高亮。深色 / 浅色切换在顶栏的圆形按钮。',

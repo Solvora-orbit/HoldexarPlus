@@ -56,6 +56,8 @@ class FanaticalBundleGame(Base):
         String(200), ForeignKey("fanatical_bundles.slug", ondelete="CASCADE"), index=True
     )
     appid: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    # Steam 捆绑包引用（0.5.0）：检索兜底未命中 app 却命中 bundle 时落引用
+    bundle_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     title: Mapped[str] = mapped_column(String(300))
     # 站点数据直取链的「尝试」只用于直标：steamId 缺失/非 app = 确知非 Steam，
     # 入库即置满（≥RESOLVE_MAX_ATTEMPTS → 前端 not_found），不再有检索重试

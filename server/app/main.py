@@ -40,6 +40,7 @@ from app.domains.redeem.router import router as redeem_router
 from app.domains.regions.router import router as regions_router
 from app.domains.settings.router import router as settings_router
 from app.domains.steam_events.router import router as steam_events_router
+from app.domains.steampy.router import router as steampy_router
 from app.domains.system.router import router as system_router
 from app.domains.wishlist.router import router as wishlist_router
 
@@ -491,6 +492,7 @@ def create_app() -> FastAPI:
     app.include_router(family_router, prefix="/api/v1")
     app.include_router(redeem_router, prefix="/api/v1")
     app.include_router(steam_events_router, prefix="/api/v1")
+    app.include_router(steampy_router, prefix="/api/v1")
 
     dist = settings.web_dist_dir
     if (dist / "index.html").is_file():

@@ -20,6 +20,21 @@ const settings: Partial<Record<MessageKey, string>> = {
   'settings.section.tour': 'Guided tour',
   'settings.section.appearance': 'Appearance',
   'settings.section.help': 'Help & diagnostics',
+  'settings.section.experimental': 'Experimental',
+
+  /* Experimental features (0.5.0): master switch off by default, risk-gated */
+  'settings.experimental.desc':
+    'When enabled, an experimental section appears in the sidebar (currently Steampy market data). Experimental features are forward-looking attempts: data is proxied from public pages, may be unstable or break when sites change, and is not purchase advice.',
+  'settings.experimental.toggle': 'Experimental features',
+  'settings.experimental.toggleHint': 'Off by default; when on, the Steampy market page appears under sidebar "More"',
+  'settings.experimental.dialogTitle': 'Enable experimental features',
+  'settings.experimental.risk1': 'Experimental data is proxied from third-party public pages; availability is not guaranteed and may break at any time.',
+  'settings.experimental.risk2': 'Experimental features do not participate in auto-fetching or alerts — for manual browsing reference only.',
+  'settings.experimental.risk3': 'Future experimental features will be enabled together under this switch; you can turn it off here at any time.',
+  'settings.experimental.consent': 'I understand the risks above and want to enable experimental features',
+  'settings.experimental.confirm': 'Enable',
+  'settings.experimental.enabledToast': 'Experimental features enabled: the experimental page is in sidebar "More"',
+  'settings.experimental.disabledToast': 'Experimental features disabled: the experimental entry is hidden',
 
   /* Appearance card (accent schemes) */
   'settings.appearance.desc': 'The accent color applies to buttons, links, charts and highlights. Dark / light toggle lives in the top bar.',

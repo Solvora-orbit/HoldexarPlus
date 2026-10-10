@@ -72,6 +72,13 @@ const router = createRouter({
       meta: titleKey('nav.bundles'),
     },
     {
+      // Steampy 行情（0.5.0 实验页）：侧栏入口随实验开关渲染，深链直进时
+      // 页内自守卫（开关关闭显示引导回设置）
+      path: '/steampy',
+      component: () => import('@/views/steampy/Index.vue'),
+      meta: titleKey('nav.steampy'),
+    },
+    {
       path: '/crawl',
       component: () => import('@/views/crawl/Index.vue'),
       meta: titleKey('nav.crawl'),

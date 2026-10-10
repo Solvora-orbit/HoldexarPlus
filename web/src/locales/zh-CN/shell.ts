@@ -22,6 +22,7 @@ const shell = {
   'nav.gamelib': '游戏库',
   'nav.achievements': '成就',
   'nav.bundles': '捆绑包',
+  'nav.steampy': 'Steampy 行情',
   'nav.pool': '我的关注',
   'nav.family': '家庭',
   'nav.bills': '账单',

@@ -26,6 +26,16 @@ SLUG_B = "hbtest-beta-bundle"
 APP_A1 = 990501
 APP_A2 = 990502
 
+
+def _as_target(fake):
+    """旧 appid 打桩 → resolve_target 适配（0.5.0 接缝；bundle 侧恒 None）。"""
+
+    async def wrapper(session, title, proxy):
+        r = await fake(session, title, proxy)
+        return (r, None) if isinstance(r, int) else (None, None)
+
+    return wrapper
+
 _NAME_RE_T = "Test Game Alpha"
 _NAME_CHARITY = "Child's Play Charity"
 
@@ -208,7 +218,7 @@ async def test_refresh_upsert_price_and_assoc(monkeypatch):
         return [{"id": 9}]
 
     monkeypatch.setattr(humble, "_fetch_page", fake_page)
-    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", fake_resolve)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", _as_target(fake_resolve))
     monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run_sequential)
     monkeypatch.setattr(humble, "_strategy_proxy", fake_proxy)
     monkeypatch.setattr(humble.asyncio, "sleep", no_sleep)
@@ -264,7 +274,7 @@ async def test_refresh_refetches_missing_tiers_within_24h(monkeypatch):
         return [{"id": 9}]
 
     monkeypatch.setattr(humble, "_fetch_page", fake_page)
-    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", fake_resolve)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", _as_target(fake_resolve))
     monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run_sequential)
     monkeypatch.setattr(humble, "_strategy_proxy", fake_proxy)
     monkeypatch.setattr(humble.asyncio, "sleep", no_sleep)
@@ -375,7 +385,7 @@ async def test_unresolved_entries_persist_with_pending(monkeypatch):
         return None
 
     monkeypatch.setattr(humble, "_fetch_page", fake_page)
-    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", fake_resolve)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", _as_target(fake_resolve))
     monkeypatch.setattr(humble, "_strategy_proxy", fake_proxy)
     monkeypatch.setattr(humble.asyncio, "sleep", no_sleep)
 
@@ -463,11 +473,14 @@ async def test_detail_tiers_cumulative_payload():
     # 累进清单：第 1 档 = 本档 1 款；第 2 档 = 第 1 档 + 本档新增（去重后 2 款）
     # unlockPriceCnyFen = 首次出现的档位价（最低解锁门槛，卡片角标数据源）
     assert tiers[0]["games"] == [
-        {"title": "Matched Game", "appid": APP_A1, "isNew": True, "unlockPriceCnyFen": 3353}
+        {"title": "Matched Game", "appid": APP_A1, "bundleId": None,
+         "isNew": True, "unlockPriceCnyFen": 3353}
     ]
     assert tiers[1]["games"] == [
-        {"title": "Matched Game", "appid": APP_A1, "isNew": False, "unlockPriceCnyFen": 3353},
-        {"title": "Missing Game", "appid": None, "isNew": True, "unlockPriceCnyFen": 6706},
+        {"title": "Matched Game", "appid": APP_A1, "bundleId": None,
+         "isNew": False, "unlockPriceCnyFen": 3353},
+        {"title": "Missing Game", "appid": None, "bundleId": None,
+         "isNew": True, "unlockPriceCnyFen": 6706},
     ]
     assert tiers[0]["newGames"][0] == {"title": "Matched Game", "appid": APP_A1}
     assert tiers[0]["count"] == 1
@@ -628,7 +641,7 @@ async def test_resolve_attempts_exhaust_marks_not_found(monkeypatch):
         return None
 
     monkeypatch.setattr(humble, "_fetch_page", fake_page)
-    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", never_resolves)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", _as_target(never_resolves))
     monkeypatch.setattr(humble.asyncio, "sleep", no_sleep)
 
     for _ in range(4):

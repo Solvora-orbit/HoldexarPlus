@@ -20,6 +20,17 @@ SLUG_B = "gmgtest-beta"     # 单档包
 APP_A1 = 553310
 APP_A2 = 244730
 
+
+def _as_target(fake):
+    """旧 appid 打桩 → resolve_target 适配（0.5.0 接缝；bundle 侧恒 None）。"""
+
+    async def wrapper(session, title, proxy):
+        r = await fake(session, title, proxy)
+        return (r, None) if isinstance(r, int) else (None, None)
+
+    return wrapper
+
+
 _LIVE_END = "2026-10-27T18:00"
 
 
@@ -210,7 +221,7 @@ async def test_refresh_upsert_assoc_and_tiers(monkeypatch):
         return None
 
     _stub_network(monkeypatch)
-    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", fake_resolve)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", _as_target(fake_resolve))
     monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run_sequential)
     monkeypatch.setattr(gmg.asyncio, "sleep", no_sleep)
 
@@ -251,7 +262,7 @@ async def test_refresh_retry_exhausted_not_found(monkeypatch):
         return None
 
     _stub_network(monkeypatch)
-    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", never_resolves)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", _as_target(never_resolves))
     monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run_sequential)
     monkeypatch.setattr(gmg.asyncio, "sleep", no_sleep)
     await gmg.refresh_gmg_bundles()
@@ -297,7 +308,7 @@ async def test_detail_payload_tiers_pending(monkeypatch):
         return None
 
     _stub_network(monkeypatch)
-    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", fake_resolve)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", _as_target(fake_resolve))
     monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run_sequential)
     monkeypatch.setattr(gmg.asyncio, "sleep", no_sleep)
     await gmg.refresh_gmg_bundles()
@@ -334,7 +345,7 @@ async def test_empty_body_detail_keeps_stale(monkeypatch):
         return None
 
     monkeypatch.setattr(gmg, "_fetch_page", empty_detail)
-    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", fake_resolve)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", _as_target(fake_resolve))
     monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run_sequential)
     monkeypatch.setattr(gmg.asyncio, "sleep", no_sleep)
     res = await gmg.refresh_gmg_bundles()
@@ -357,7 +368,7 @@ async def test_mark_seen_and_list(monkeypatch):
         return None
 
     _stub_network(monkeypatch)
-    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", fake_resolve)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", _as_target(fake_resolve))
     monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run_sequential)
     monkeypatch.setattr(gmg.asyncio, "sleep", no_sleep)
     await gmg.refresh_gmg_bundles()

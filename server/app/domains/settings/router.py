@@ -208,3 +208,24 @@ async def update_fetch_settings(payload: FetchSettingsUpdate) -> FetchSettingsPa
         # 只落偏好：价格轮每轮开工时现读，改动从下一轮生效
         await service.set_value("crawl.catalog_refresh", bool(payload.catalog_refresh))
     return await _read_fetch_settings()
+
+
+# ── 实验性功能（0.5.0）：总开关默认关，开启须经前端风险确认弹窗 ──────
+
+class ExperimentalSettingsPayload(BaseModel):
+    enabled: bool
+
+
+@router.get("/experimental")
+async def get_experimental_settings() -> ExperimentalSettingsPayload:
+    return ExperimentalSettingsPayload(
+        enabled=bool(await service.get_value("experimental.enabled", False))
+    )
+
+
+@router.put("/experimental")
+async def update_experimental_settings(
+    payload: ExperimentalSettingsPayload,
+) -> ExperimentalSettingsPayload:
+    await service.set_value("experimental.enabled", bool(payload.enabled))
+    return await get_experimental_settings()

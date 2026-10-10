@@ -57,6 +57,9 @@ class HumbleBundleGame(Base):
         String(160), ForeignKey("humble_bundles.slug", ondelete="CASCADE"), index=True
     )
     appid: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    # Steam 捆绑包引用（0.5.0）：条目名按 app 检索不到但按 bundle 命中时落
+    # bundles 表的 bundle_id（抽屉按捆绑包卡展示比价）；与 appid 互斥使用
+    bundle_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     title: Mapped[str] = mapped_column(String(300))
     # 下架包保留行（历史可查），on_sale 只挂在包行上
     # storesearch 关联尝试计数（0.3.2）：≥3 轮仍解析不出 → 前端标「未找到」

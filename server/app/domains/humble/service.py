@@ -384,26 +384,37 @@ async def _sync_bundle_detail(
             await s.execute(
                 select(
                     HumbleBundleGame.title, HumbleBundleGame.appid,
-                    HumbleBundleGame.resolve_attempts,
+                    HumbleBundleGame.resolve_attempts, HumbleBundleGame.bundle_id,
                 ).where(HumbleBundleGame.slug == bundle.slug)
             )
         ).all()
-    resolved_known = {t for t, a, _n in rows if a is not None}
-    pending_known = {t for t, a, _n in rows if a is None}
+    resolved_known = {t for t, a, _n, _b in rows if a is not None}
+    # bundle 已命中的条目不再走 app 检索（0.5.0：按 Steam 捆绑包联动语义完事）
+    bundle_known = {t for t, _a, _n, b in rows if b is not None}
+    pending_known = {t for t, a, _n, _b in rows if a is None}
     # 只解「新面孔 + 未放弃的欠账」；已有关联跳过（storesearch 省额度）。
     # 尝试 ≥3 轮的欠账不再重试（0.3.2 非 Steam 标注）：GOG 独占/商店下架
     # 之类永远解不出，空转每轮白烧一次查询；抽屉如实标「未找到」。
-    exhausted = {t for t, a, n in rows if a is None and int(n or 0) >= RESOLVE_MAX_ATTEMPTS}
-    to_resolve = [t for t in titles if t not in resolved_known and t not in exhausted]
+    exhausted = {
+        t for t, a, n, b in rows
+        if a is None and b is None and int(n or 0) >= RESOLVE_MAX_ATTEMPTS
+    }
+    to_resolve = [
+        t for t in titles
+        if t not in resolved_known and t not in exhausted and t not in bundle_known
+    ]
 
     resolved: dict[str, int] = {}
+    resolved_bundle: dict[str, int] = {}
     unresolved: list[str] = []
     for title in to_resolve:
-        appid = await metadata_service._resolve_appid(session, title, proxy)
-        if appid is None:
-            unresolved.append(title)
-        else:
+        appid, bundleid = await metadata_service._resolve_target(session, title, proxy)
+        if appid is not None:
             resolved[title] = appid
+        elif bundleid is not None:
+            resolved_bundle[title] = bundleid
+        else:
+            unresolved.append(title)
         await asyncio.sleep(0.3)
 
     # 解析成功但目录无行的 appid：只收集回传（0.2.2 收录链解耦——刷新末尾
@@ -442,16 +453,26 @@ async def _sync_bundle_detail(
                 .values(updated_at=now)
             )
         existing = {
-            t: a for t, a in await s.execute(
-                select(HumbleBundleGame.title, HumbleBundleGame.appid).where(
-                    HumbleBundleGame.slug == bundle.slug
-                )
+            t: (a, b) for t, a, b in await s.execute(
+                select(
+                    HumbleBundleGame.title, HumbleBundleGame.appid,
+                    HumbleBundleGame.bundle_id,
+                ).where(HumbleBundleGame.slug == bundle.slug)
             )
         }
+        # bundle 联动入库（0.5.0）：命中 bundleid 的条目复用 bundles 域抓取
+        # 落库（不挂 monitoring track）；失败仍落 bundle_id 引用，下轮重试
+        for title, bid in resolved_bundle.items():
+            try:
+                from app.domains.bundles import refresh as bundles_refresh
+
+                await bundles_refresh.ensure_bundle_stored(bid)
+            except Exception:  # noqa: BLE001
+                logger.exception("[humble-bundles] bundle %d 联动入库异常", bid)
         for title in titles:
             if title in resolved:
                 if title in existing:
-                    if existing[title] is None:
+                    if existing[title][0] is None:
                         await s.execute(
                             update(HumbleBundleGame)
                             .where(
@@ -462,6 +483,22 @@ async def _sync_bundle_detail(
                         )
                 else:
                     s.add(HumbleBundleGame(slug=bundle.slug, appid=resolved[title], title=title))
+            elif title in resolved_bundle:
+                bid = resolved_bundle[title]
+                if title in existing:
+                    if existing[title][1] is None:
+                        await s.execute(
+                            update(HumbleBundleGame)
+                            .where(
+                                HumbleBundleGame.slug == bundle.slug,
+                                HumbleBundleGame.title == title,
+                            )
+                            .values(bundle_id=bid)
+                        )
+                else:
+                    s.add(HumbleBundleGame(
+                        slug=bundle.slug, appid=None, bundle_id=bid, title=title,
+                    ))
             elif title not in existing:
                 # 未解析也落行（appid 留空）：外层计数 = 全部条目，欠账下轮重试；
                 # 本轮已尝试过一次失败的直接记 1（0.3.2 尝试记账）
@@ -481,9 +518,13 @@ async def _sync_bundle_detail(
                     )
                     .values(resolve_attempts=HumbleBundleGame.resolve_attempts + 1)
                 )
-        # 页面已消失的旧条目清理（仅删未解析欠账行；已有关联的保留历史）
+        # 页面已消失的旧条目清理（仅删无关联的欠账行；已有关联/捆绑包引用的
+        # 保留历史——bundle 引用行与已解析行同为「有结论」数据）
         title_set = set(titles)
-        stale_unresolved = [t for t in existing if t not in title_set and existing[t] is None]
+        stale_unresolved = [
+            t for t, (a, b) in existing.items()
+            if t not in title_set and a is None and b is None
+        ]
         if stale_unresolved:
             for g in (
                 await s.execute(
@@ -803,11 +844,11 @@ async def bundle_detail(slug: str) -> dict | None:
             await s.execute(
                 select(
                     HumbleBundleGame.appid, HumbleBundleGame.title,
-                    HumbleBundleGame.resolve_attempts,
+                    HumbleBundleGame.resolve_attempts, HumbleBundleGame.bundle_id,
                 ).where(HumbleBundleGame.slug == slug)
             )
         ).all()
-        appids = [int(a) for a, _t, _n in rows if a is not None]
+        appids = [int(a) for a, _t, _n, _b in rows if a is not None]
         # 有 appid 但 games 目录还没行的 = 首爬收录中
         have: set[int] = set()
         if appids:
@@ -819,16 +860,21 @@ async def bundle_detail(slug: str) -> dict | None:
     pending = [
         {
             "appid": int(a) if a is not None else None, "title": title,
-            # 三态（0.3.2）：解析放弃（尝试≥3 仍无果，大概率非 Steam 发行）
-            # > 已解析待目录收录（ingesting）> 关联欠账重试中（resolving）
+            # Steam 捆绑包引用（0.5.0）：条目按 bundle 命中，抽屉按捆绑包卡展示
+            "bundleId": int(b) if b is not None else None,
+            # 四态（0.5.0）：bundle（按 Steam 捆绑包联动）> 解析放弃（尝试≥3
+            # 仍无果，大概率非 Steam 发行）> 已解析待目录收录（ingesting）>
+            # 关联欠账重试中（resolving）
             "status": (
-                "not_found"
+                "bundle"
+                if a is None and b is not None
+                else "not_found"
                 if a is None and int(n or 0) >= RESOLVE_MAX_ATTEMPTS
                 else "ingesting" if a is not None and int(a) not in have
                 else "resolving"
             ),
         }
-        for a, title, n in rows
+        for a, title, n, b in rows
         if a is None or int(a) not in have
     ]
     # 档位（0.2.2 存本档新增；0.2.3 展开累进售卖语义）：每档 games =
@@ -836,8 +882,10 @@ async def bundle_detail(slug: str) -> dict | None:
     # newGames/newCount 保留作「本档新增」小标。
     # 旧数据 tiers_json NULL → 空数组，前端回退平铺。
     title_appid: dict[str, int | None] = {}
-    for a, title, _n in rows:
+    title_bundle: dict[str, int | None] = {}
+    for a, title, _n, b in rows:
         title_appid.setdefault(title, int(a) if a is not None else None)
+        title_bundle.setdefault(title, int(b) if b is not None else None)
     tiers_out: list[dict] = []
     if bundle.tiers_json:
         try:
@@ -857,6 +905,7 @@ async def bundle_detail(slug: str) -> dict | None:
             # 门槛（累进售卖下首现档即最低价），卡片角标免点击可辨价位
             news = [
                 {"title": x, "appid": title_appid.get(x),
+                 "bundleId": title_bundle.get(x),
                  "unlockPriceCnyFen": t.get("price_cny_fen")}
                 for x in new_titles
             ]

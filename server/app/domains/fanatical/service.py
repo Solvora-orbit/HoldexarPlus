@@ -114,7 +114,7 @@ def _minor_map(raw: object) -> dict[str, int] | None:
     out: dict[str, int] = {}
     for ccy, v in raw.items():
         try:
-            n = float(v)  # type: ignore[arg-type]
+            n = float(v)
         except (TypeError, ValueError):
             continue
         if n >= 0 and isinstance(ccy, str) and len(ccy) == 3:
@@ -203,6 +203,10 @@ def _unix_to_dt(v: object) -> datetime | None:
     except (TypeError, ValueError):
         return None
     if n <= 0:
+        return None
+    # 站点用「公元 3001 年」表示永久在售（实测 available_valid_until =
+    # 32503680000），超过 2100 年的一律视为无到期（0.5.0 显示修复根因）
+    if n > 4102444800:  # 2100-01-01
         return None
     return datetime.fromtimestamp(n, tz=timezone.utc).replace(tzinfo=None)
 
@@ -426,7 +430,10 @@ async def _sync_bundle_games(
     steamId，实测 Saint Kotar/Dreamscaper 等全是 drm:["steam"] + 空串 id），
     走统一检索引擎兜底（attempts 记账，与 HB/GMG 同账本）；drm 不含 steam
     = 确知非 Steam，直置满；合辑 SKU（Double/Triple Pack、A + B、Pack/
-    Bundle/Collection 收尾）无单 app 对应，直置满不烧检索。返回条目数。"""
+    Bundle/Collection 收尾）无单 app 对应，直置满不烧检索。
+    0.5.0：检索兜底改 `resolve_target`（app 落空时 bundle 兜底），命中
+    bundle → 复用 bundles 域入库 + 条目落 bundle_id（抽屉按捆绑包卡展示）。
+    返回条目数。"""
     from app.domains.metadata import service as metadata_service
 
     titles = list(dict.fromkeys(
@@ -452,8 +459,13 @@ async def _sync_bundle_games(
         if steam_map.get(t) is None and on_steam.get(t) and not is_combo_sku(t)
     ]
     resolved: dict[str, int] = {}
+    resolved_bundle: dict[str, int] = {}
     for title in to_resolve:
-        resolved[title] = await metadata_service._resolve_appid(session, title, proxy) or 0
+        appid, bundleid = await metadata_service._resolve_target(session, title, proxy)
+        if appid is not None:
+            resolved[title] = appid
+        elif bundleid is not None:
+            resolved_bundle[title] = bundleid
         await asyncio.sleep(0.3)
 
     async with write_gate(WritePriority.BACKGROUND, label="fanatical_games"), \
@@ -495,13 +507,14 @@ async def _sync_bundle_games(
                     resolve_attempts=(
                         0 if appid is not None
                         else RESOLVE_MAX_ATTEMPTS if known_missing
+                        else 0 if title in resolved_bundle  # bundle 命中不算失败
                         else 1 if title in to_resolve
                         else 0
                     ),
                 ))
         # 检索兜底失败的既有行：attempts+1（与 HB/GMG 账本同语义；达上限后
-        # to_resolve 不再拾取——下一轮起 not_found）
-        failed = [t for t in to_resolve if resolved.get(t) is None or resolved[t] == 0]
+        # to_resolve 不再拾取——下一轮起 not_found）；bundle 命中的不算失败
+        failed = [t for t in to_resolve if t not in resolved and t not in resolved_bundle]
         for title in failed:
             if title in existing:
                 await s.execute(
@@ -511,6 +524,21 @@ async def _sync_bundle_games(
                            FanaticalBundleGame.appid.is_(None))
                     .values(resolve_attempts=FanaticalBundleGame.resolve_attempts + 1)
                 )
+        # bundle 命中：复用 bundles 域入库（不挂 monitoring track）+ 落引用
+        for title, bid in resolved_bundle.items():
+            try:
+                from app.domains.bundles import refresh as bundles_refresh
+
+                await bundles_refresh.ensure_bundle_stored(bid)
+            except Exception:  # noqa: BLE001
+                logger.exception("[fanatical-bundles] bundle %d 联动入库异常", bid)
+            await s.execute(
+                update(FanaticalBundleGame)
+                .where(FanaticalBundleGame.slug == bundle_slug,
+                       FanaticalBundleGame.title == title,
+                       FanaticalBundleGame.appid.is_(None))
+                .values(bundle_id=bid)
+            )
         count_sq = (
             select(func.count())
             .select_from(FanaticalBundleGame)
@@ -772,11 +800,11 @@ async def bundle_detail(slug: str) -> dict | None:
             await s.execute(
                 select(
                     FanaticalBundleGame.appid, FanaticalBundleGame.title,
-                    FanaticalBundleGame.resolve_attempts,
+                    FanaticalBundleGame.resolve_attempts, FanaticalBundleGame.bundle_id,
                 ).where(FanaticalBundleGame.slug == slug)
             )
         ).all()
-        appids = [int(a) for a, _t, _n in rows if a is not None]
+        appids = [int(a) for a, _t, _n, _b in rows if a is not None]
         have: set[int] = set()
         if appids:
             have = {
@@ -787,19 +815,24 @@ async def bundle_detail(slug: str) -> dict | None:
     pending = [
         {
             "appid": int(a) if a is not None else None, "title": title,
+            "bundleId": int(b) if b is not None else None,
             "status": (
-                "not_found"
+                "bundle"
+                if a is None and b is not None
+                else "not_found"
                 if a is None and int(n or 0) >= RESOLVE_MAX_ATTEMPTS
                 else "ingesting" if a is not None and int(a) not in have
                 else "resolving"
             ),
         }
-        for a, title, n in rows
+        for a, title, n, b in rows
         if a is None or int(a) not in have
     ]
     title_appid: dict[str, int | None] = {}
-    for a, title, _n in rows:
+    title_bundle: dict[str, int | None] = {}
+    for a, title, _n, b in rows:
         title_appid.setdefault(title, int(a) if a is not None else None)
+        title_bundle.setdefault(title, int(b) if b is not None else None)
 
     tiers_out: list[dict] = []
     if bundle.tiers_json:
@@ -816,7 +849,8 @@ async def bundle_detail(slug: str) -> dict | None:
             pool_min_price = _min_price_map(prices)
         # pick 的池子 = 全部条目（games 表行）；tiered 的档内容 = tiers_json titles
         pool_games = [
-            {"title": x, "appid": a, "isNew": False, "unlockPriceMap": pool_min_price}
+            {"title": x, "appid": a, "bundleId": title_bundle.get(x),
+             "isNew": False, "unlockPriceMap": pool_min_price}
             for x, a in title_appid.items()
         ]
         for idx, t in enumerate(raw_tiers if isinstance(raw_tiers, list) else []):
@@ -829,7 +863,8 @@ async def bundle_detail(slug: str) -> dict | None:
             else:
                 titles = [x for x in (t.get("titles") or []) if isinstance(x, str)]
                 games = [
-                    {"title": x, "appid": title_appid.get(x), "isNew": False,
+                    {"title": x, "appid": title_appid.get(x),
+                     "bundleId": title_bundle.get(x), "isNew": False,
                      "unlockPriceMap": price}
                     for x in titles
                 ]

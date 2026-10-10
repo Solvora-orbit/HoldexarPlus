@@ -191,7 +191,21 @@ async def _fetch_storesearch(
 _SEARCH_ANCHOR_RE = re.compile(
     r'<a[^>]*?href="(?:https?://store\.steampowered\.com)?/app/(\d+)[^"]*"[^>]*?>'
 )
+# 捆绑包行（0.5.0）：同一结果页里 data-ds-bundleid 锚 + 同款 title 配对——
+# 三站查不到 app 的条目名（Complete Edition 合辑等）常能按 bundle 命中
+_SEARCH_BUNDLE_ANCHOR_RE = re.compile(r'data-ds-bundleid="(\d+)"')
 _SEARCH_TITLE_RE = re.compile(r'<span class="title">([^<]+)</span>')
+
+
+def _pair_anchors_with_titles(anchors: list[tuple[int, int]], titles: list[tuple[int, str]]) -> list[dict]:
+    rows: list[dict] = []
+    ti = 0
+    for pos, ident in anchors:
+        while ti < len(titles) and titles[ti][0] < pos:
+            ti += 1
+        if ti < len(titles) and titles[ti][1]:
+            rows.append({"id": ident, "name": titles[ti][1]})
+    return rows
 
 
 def parse_search_rows(html_text: str) -> list[dict]:
@@ -201,19 +215,22 @@ def parse_search_rows(html_text: str) -> list[dict]:
         (m.start(), html.unescape(m.group(1)).strip())
         for m in _SEARCH_TITLE_RE.finditer(html_text)
     ]
-    rows: list[dict] = []
-    ti = 0
-    for pos, appid in anchors:
-        while ti < len(titles) and titles[ti][0] < pos:
-            ti += 1
-        if ti < len(titles) and titles[ti][1]:
-            rows.append({"id": appid, "name": titles[ti][1]})
-    return rows
+    return _pair_anchors_with_titles(anchors, titles)
 
 
-async def _fetch_search_page(
+def parse_search_bundle_rows(html_text: str) -> list[dict]:
+    """搜索页 HTML → 捆绑包行 [{id: bundleid, name}]（相关度序）。"""
+    anchors = [(m.start(), int(m.group(1))) for m in _SEARCH_BUNDLE_ANCHOR_RE.finditer(html_text)]
+    titles = [
+        (m.start(), html.unescape(m.group(1)).strip())
+        for m in _SEARCH_TITLE_RE.finditer(html_text)
+    ]
+    return _pair_anchors_with_titles(anchors, titles)
+
+
+async def _fetch_search_page_raw(
     session: aiohttp.ClientSession, term: str, proxy: str | None
-) -> list[dict]:
+) -> str:
     try:
         async with session.get(
             _SEARCH_URL,
@@ -223,10 +240,65 @@ async def _fetch_search_page(
             timeout=aiohttp.ClientTimeout(total=25),
         ) as resp:
             if resp.status != 200:
-                return []
-            return parse_search_rows(await resp.text(errors="replace"))
+                return ""
+            return await resp.text(errors="replace")
     except Exception:  # noqa: BLE001
-        return []
+        return ""
+
+
+async def _fetch_search_page(
+    session: aiohttp.ClientSession, term: str, proxy: str | None
+) -> list[dict]:
+    return parse_search_rows(await _fetch_search_page_raw(session, term, proxy))
+
+
+def _pick_bundleid(title: str, rows: list[dict]) -> int | None:
+    """捆绑包行 → bundleid：exact → 清洗名相等，取首个。
+
+    只做两级（bundle 行名称规范且条目少，prefix/相似会把 "X Collection"
+    错对到 "X" 合辑——宁缺勿猜）。"""
+    want = title.lower().strip()
+    want_clean = normalize_title(title)
+    for row in rows:
+        name = str(row.get("name") or "")
+        rid = str(row.get("id") or "")
+        if not name or not rid.isdigit():
+            continue
+        if name.lower().strip() == want:
+            return int(rid)
+        if want_clean and normalize_title(name) == want_clean:
+            return int(rid)
+    return None
+
+
+async def resolve_target(
+    session: aiohttp.ClientSession, title: str, proxy: str | None
+) -> tuple[int | None, int | None]:
+    """条目标题 → (Steam appid, Steam bundleid)（0.5.0）。
+
+    storesearch 阶段只产 appid（API 无 bundle）；搜索页阶段同页同时解析
+    app 行与 bundle 行——查 app 顺手拿 bundle，零额外请求。**app 命中优先
+    于任何更早的 bundle 命中**（bundle 只在 app 全链落空时兜底返回），
+    全链失败 (None, None) 由调用方记账。"""
+    for term in _query_terms(title):
+        hits = await _fetch_storesearch(session, term, proxy)
+        if hits:
+            pick = _pick_appid(title, hits)
+            if pick is not None:
+                return pick, None
+    bundle_pick: int | None = None
+    for i, term in enumerate(_query_terms(title)):
+        if i:
+            await asyncio.sleep(0.5)
+        page = await _fetch_search_page_raw(session, term, proxy)
+        if not page:
+            continue
+        pick = _pick_appid(title, parse_search_rows(page))
+        if pick is not None:
+            return pick, bundle_pick
+        if bundle_pick is None:
+            bundle_pick = _pick_bundleid(title, parse_search_bundle_rows(page))
+    return None, bundle_pick
 
 
 async def resolve_appid(
@@ -235,19 +307,7 @@ async def resolve_appid(
     """条目标题 → Steam appid（两级检索源；全链失败返回 None 由调用方记账）。
 
     第一源 storesearch 按词链逐档打；五级选不出才进第二源搜索页（HTTP 层
-    失败视作空命中继续降档/换源，不做单点短路）。"""
-    for term in _query_terms(title):
-        hits = await _fetch_storesearch(session, term, proxy)
-        if hits:
-            pick = _pick_appid(title, hits)
-            if pick is not None:
-                return pick
-    for i, term in enumerate(_query_terms(title)):
-        if i:
-            await asyncio.sleep(0.5)
-        hits = await _fetch_search_page(session, term, proxy)
-        if hits:
-            pick = _pick_appid(title, hits)
-            if pick is not None:
-                return pick
-    return None
+    失败视作空命中继续降档/换源，不做单点短路）。0.5.0 起为 resolve_target
+    的 appid 侧委托。"""
+    appid, _bundle = await resolve_target(session, title, proxy)
+    return appid

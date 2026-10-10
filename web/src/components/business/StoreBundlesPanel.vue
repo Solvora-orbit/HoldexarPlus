@@ -34,7 +34,7 @@ const {
   bundles, loading, running, ingestRunning, ingestPending,
   expanded, shown, hiddenCount,
   open, detailLoading, detail, detailItems, detailPending, detailTiers,
-  refresh, ingestNow, openBundle, period, daysLeft, urgencyClass,
+  refresh, ingestNow, openBundle, period, daysLeft, isLongRunning, urgencyClass,
 } = src
 
 // ─── 货币切换（站点原生多币种、零折算）───
@@ -169,7 +169,7 @@ const drawerPeriod = computed(() => (detail.value ? period(detail.value) : ''))
             </HlImg>
             <span v-if="b.isNew" class="sp-card__new">NEW</span>
             <span
-              v-if="daysLeft(b.endAt) !== null"
+              v-if="daysLeft(b.endAt) !== null && !isLongRunning(b.endAt)"
               class="sp-card__ending"
               :class="urgencyClass(b.endAt)"
             >

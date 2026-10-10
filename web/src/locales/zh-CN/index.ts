@@ -27,6 +27,7 @@ import dashboard from './dashboard'
 import library from './library'
 import logs from './logs'
 import rates from './rates'
+import steampy from './steampy'
 import toolbox from './toolbox'
 // ── 独立视图与组件（views/<name>/Index.vue、components/ProductTour.vue）──
 import proxies from './proxies'
@@ -89,6 +90,7 @@ export const messages = {
   ...trendChart,
   ...toolbox,
   ...bundles,
+  ...steampy,
   ...about,
   ...dashboard,
   ...rates,

@@ -12,19 +12,20 @@
  * 价格一律按 props.currency 从原生多币种 priceMap 取值展示（零折算），
  * HB 固定传 'CNY'（priceMap = {CNY: fen}）。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 
-import type { GameListItem, HumblePendingGame, StoreTier } from '@/api/client'
-import { formatMoney } from '@/api/regions'
+import { bundlesApi, type BundleDetail, type GameListItem, type HumblePendingGame, type StoreTier } from '@/api/client'
+import { formatCnyFen, formatMoney } from '@/api/regions'
 import { APP_SLUG } from '@/appInfo'
 import { useRegionsStore } from '@/stores/regions'
 import { useI18n } from '@/locales'
 import HlGameCard from '@/components/business/HlGameCard.vue'
-import { HlDrawer, HlEmpty, HlSpinner } from '@/components/ui'
+import { HlDrawer, HlEmpty, HlImg, HlSpinner } from '@/components/ui'
 
 export interface BundleDrawerTierGame {
   title: string
   appid: number | null
+  bundleId?: number | null
   isNew?: boolean
   unlockPriceMap?: Record<string, number> | null
 }
@@ -74,10 +75,11 @@ const pendingByTitle = computed(() => {
   return m
 })
 
-/** 非卡片条目状态 → 文案键（三态：关联中/收录中/未找到） */
+/** 非卡片条目状态 → 文案键（四态：关联中/收录中/未找到/Steam 捆绑包） */
 function humStatusKey(status: HumblePendingGame['status']): string {
   if (status === 'ingesting') return 'bundles.store.ingesting'
   if (status === 'not_found') return 'bundles.store.notFound'
+  if (status === 'bundle') return 'bundles.store.bundleTag'
   return 'bundles.store.resolving'
 }
 
@@ -88,10 +90,41 @@ function rowStatusKey(title: string, appid: number | null): string {
   return appid == null ? 'bundles.store.resolving' : 'bundles.store.ingesting'
 }
 
-/* 档位选择器：选中的档按 kind 语义展示；换包/重开回第一档 */
+// ── Steam 捆绑包卡（0.5.0）：bundleId 条目点击内嵌展开包内游戏比价 ──
+const bundleState = reactive<{
+  details: Map<number, BundleDetail>
+  loading: Set<number>
+  expanded: Set<number>
+}>({ details: new Map(), loading: new Set(), expanded: new Set() })
+
+async function toggleBundle(bundleId: number) {
+  if (bundleState.expanded.has(bundleId)) {
+    bundleState.expanded.delete(bundleId)
+    return
+  }
+  bundleState.expanded.add(bundleId)
+  if (bundleState.details.has(bundleId) || bundleState.loading.has(bundleId)) return
+  bundleState.loading.add(bundleId)
+  try {
+    const d = await bundlesApi.detail(String(bundleId))
+    bundleState.details.set(bundleId, d)
+  } catch {
+    /* 拉取失败收起（下次点击重试）；卡片本体不受影响 */
+    bundleState.expanded.delete(bundleId)
+  } finally {
+    bundleState.loading.delete(bundleId)
+  }
+}
+
+function bundleName(bundleId: number, fallback: string): string {
+  return bundleState.details.get(bundleId)?.name ?? fallback
+}
+
+/* 档位选择器：选中的档按 kind 语义展示；换包/重开回第一档并清捆绑包展开态 */
 const activeTier = ref(0)
 watch(() => [props.open, props.tiers], () => {
   activeTier.value = 0
+  bundleState.expanded.clear()
 })
 
 const activeTierData = computed<StoreTier | null>(() => props.tiers[activeTier.value] ?? null)
@@ -208,6 +241,51 @@ const loosePending = computed(() =>
               layout-mode="grid"
               :enabled-regions="regionsStore.enabledCodes"
             />
+            <!-- Steam 捆绑包卡（0.5.0）：条目按 bundle 命中，点击内嵌展开包内比价 -->
+            <div v-else-if="g.bundleId != null" class="bd-bundle" @click="toggleBundle(g.bundleId)">
+              <div class="bd-bundle__cover">
+                <HlImg
+                  :src="bundleState.details.get(g.bundleId)?.headerImage || ''"
+                  :alt="bundleName(g.bundleId, g.title)"
+                  loading="lazy"
+                >
+                  <template #fallback>
+                    <span class="bd-bundle__glyph" aria-hidden="true">{{ bundleName(g.bundleId, g.title).slice(0, 1) }}</span>
+                  </template>
+                </HlImg>
+              </div>
+              <div class="bd-bundle__body">
+                <span class="bd-bundle__tag">{{ t('bundles.store.bundleTag') }}</span>
+                <span class="bd-bundle__name">{{ bundleName(g.bundleId, g.title) }}</span>
+                <span v-if="bundleState.details.get(g.bundleId)" class="bd-bundle__meta">
+                  {{ t('bundles.store.bundleMeta', {
+                    n: bundleState.details.get(g.bundleId)!.appIds.length,
+                    price: formatCnyFen(bundleState.details.get(g.bundleId)!.cnCnyFen),
+                  }) }}
+                </span>
+                <span v-else class="bd-bundle__meta">{{ t('bundles.store.bundleExpand') }}</span>
+              </div>
+              <div v-if="bundleState.loading.has(g.bundleId)" class="bd-bundle__loading">
+                <HlSpinner />
+              </div>
+              <div v-else-if="bundleState.expanded.has(g.bundleId)" class="bd-bundle__games" @click.stop>
+                <div
+                  v-for="bg in bundleState.details.get(g.bundleId)?.games ?? []"
+                  :key="bg.appid"
+                  class="bd-bundle__game"
+                >
+                  <HlImg :src="bg.headerImage" :alt="bg.name ?? String(bg.appid)" loading="lazy">
+                    <template #fallback>
+                      <span class="bd-bundle__game-glyph" aria-hidden="true">{{ (bg.name || '?').slice(0, 1) }}</span>
+                    </template>
+                  </HlImg>
+                  <span class="bd-bundle__game-name">{{ bg.name ?? t('bundles.steam.appidFallback', { id: bg.appid }) }}</span>
+                  <span class="bd-bundle__game-price">
+                    {{ formatCnyFen(bg.prices?.CN?.cnyFen ?? null) }}
+                  </span>
+                </div>
+              </div>
+            </div>
             <!-- 没卡片的游戏：卡形占位（封面位+标题+状态），与真卡同格同形 -->
             <div v-else class="bd-pending__card">
               <div class="bd-pending__card-cover">
@@ -387,6 +465,120 @@ const loosePending = computed(() =>
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   pointer-events: none;
+}
+/* Steam 捆绑包卡（0.5.0）：bundleId 条目的卡形态，点击内嵌展开包内比价 */
+.bd-bundle {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--accent-a50);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow: hidden;
+  height: 100%;
+  cursor: pointer;
+  transition: box-shadow var(--transition), border-color var(--transition);
+}
+.bd-bundle:hover {
+  box-shadow: var(--shadow-lg);
+}
+.bd-bundle__cover {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: var(--surface-inset);
+}
+.bd-bundle__cover :deep(img) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.bd-bundle__glyph {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+.bd-bundle__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 12px 11px;
+}
+.bd-bundle__tag {
+  align-self: flex-start;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--ink-on-fill);
+  font-size: 10px;
+  font-weight: 700;
+}
+.bd-bundle__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.bd-bundle__meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.bd-bundle__loading {
+  display: grid;
+  place-items: center;
+  padding: 14px 0;
+}
+/* 内嵌包内游戏行（点开后）：与 SteamBundlesPanel 抽屉行同信息密度 */
+.bd-bundle__games {
+  border-top: 1px dashed var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.bd-bundle__game {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  min-width: 0;
+}
+.bd-bundle__game + .bd-bundle__game {
+  border-top: 1px solid var(--surface-inset);
+}
+.bd-bundle__game :deep(img),
+.bd-bundle__game :deep(.bd-bundle__game-glyph) {
+  width: 52px;
+  height: 24px;
+  object-fit: cover;
+  flex-shrink: 0;
+  border-radius: 3px;
+  display: grid;
+  place-items: center;
+  background: var(--surface-inset);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+.bd-bundle__game-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.bd-bundle__game-price {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--success);
+  font-variant-numeric: tabular-nums;
 }
 /* 卡形占位：档位格里未入目录的条目与真卡同形同高 */
 .bd-pending__card {

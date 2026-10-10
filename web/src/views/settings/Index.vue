@@ -24,6 +24,7 @@ import { useI18n, type MessageKey } from '@/locales'
 import { useAccountStore } from '@/stores/account'
 import { useRegionsStore } from '@/stores/regions'
 import { useSettingsStore } from '@/stores/settings'
+import { useExperimental } from '@/stores/experimental'
 import { useThemeStore, type AccentScheme } from '@/stores/theme'
 import { useTourStore } from '@/stores/tour'
 import { useUpdaterStore } from '@/stores/updater'
@@ -141,6 +142,49 @@ async function confirmWipe() {
     message.error(e instanceof Error ? e.message : String(e))
   } finally {
     wiping.value = false
+  }
+}
+
+/* ── 实验性功能（0.5.0）：总开关 + 风险确认弹窗 ──
+   开启须勾选同意（弹窗）；关闭直接生效不弹。状态走 experimental store
+   （侧栏 Steampy 实验页即时跟随），开启后侧栏出 Steampy 实验页 */
+const EXPERIMENTAL_RISKS = [
+  'settings.experimental.risk1',
+  'settings.experimental.risk2',
+  'settings.experimental.risk3',
+] as const
+const experimentalDialogOpen = ref(false)
+const experimentalConsent = ref(false)
+const experimentalBusy = ref(false)
+const { enabled: experimentalEnabled, load: loadExperimental, set: setExperimental } = useExperimental()
+
+function openExperimentalDialog(next: boolean) {
+  if (experimentalBusy.value) return
+  if (!next) {
+    // 关闭直接生效（风险只在新开启时确认）
+    void updateExperimental(false)
+    return
+  }
+  experimentalConsent.value = false
+  experimentalDialogOpen.value = true
+}
+
+async function confirmExperimental() {
+  if (experimentalBusy.value || !experimentalConsent.value) return
+  await updateExperimental(true)
+  experimentalDialogOpen.value = false
+  experimentalConsent.value = false
+}
+
+async function updateExperimental(enabled: boolean) {
+  experimentalBusy.value = true
+  try {
+    await setExperimental(enabled)
+    message.success(t(enabled ? 'settings.experimental.enabledToast' : 'settings.experimental.disabledToast'))
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    experimentalBusy.value = false
   }
 }
 
@@ -1261,6 +1305,7 @@ onMounted(() => {
   void loadSecurity()
   void loadExports()
   void loadHelpDiagnostics()
+  void loadExperimental()
   /* 登录会话在后端存续：进页先对状态快照，进行中就恢复状态卡并续上轮询 */
   void refreshLoginState().then(() => {
     if (loginActive.value) startLoginPolling()
@@ -2333,7 +2378,53 @@ onUnmounted(stopLoginPolling)
           </div>
         </div>
       </div>
+
+      <!-- 实验性功能（0.5.0）：总开关默认关，开启须风险确认弹窗；开启后侧栏
+           出现实验分区（Steampy 行情）。数据口径与风险见确认弹窗文案 -->
+      <div class="card settings-card" data-section="settings.section.experimental">
+        <div class="section-title">{{ t('settings.section.experimental') }}</div>
+        <div class="section-desc">{{ t('settings.experimental.desc') }}</div>
+        <div class="settings-row">
+          <div class="settings-row__info">
+            <span class="settings-row__label">{{ t('settings.experimental.toggle') }}</span>
+            <span class="settings-row__hint">{{ t('settings.experimental.toggleHint') }}</span>
+          </div>
+          <HlSwitch
+            :model-value="experimentalEnabled"
+            :disabled="experimentalBusy"
+            @update:model-value="openExperimentalDialog"
+          />
+        </div>
+      </div>
     </template>
+
+    <!-- 实验功能风险确认：勾选同意后确认键才可用 -->
+    <HlDialog
+      v-model="experimentalDialogOpen"
+      :title="t('settings.experimental.dialogTitle')"
+      :width="520"
+      :mask-closable="false"
+    >
+      <div class="risk-body">
+        <ul class="risk-body__list">
+          <li v-for="it in EXPERIMENTAL_RISKS" :key="it">
+            <span class="risk-body__rest">{{ t(it) }}</span>
+          </li>
+        </ul>
+        <HlCheckbox v-model="experimentalConsent" class="risk-consent">
+          <span class="risk-consent__text">{{ t('settings.experimental.consent') }}</span>
+        </HlCheckbox>
+      </div>
+      <template #footer>
+        <HlButton variant="text" size="sm" @click="experimentalDialogOpen = false">
+          {{ t('common.cancel') }}
+        </HlButton>
+        <HlButton art="outline" tone="green" size="sm" :disabled="!experimentalConsent" @click="confirmExperimental">
+          <HlIcon v-if="experimentalConsent" name="check" />
+          {{ t('settings.experimental.confirm') }}
+        </HlButton>
+      </template>
+    </HlDialog>
 
     <!-- 绑定风险弹窗：每次绑定动作（手动/自动）都会弹出，标红同意勾选后
          确定键才可用；确定后才继续——'auto' 打开 Steam 登录子窗口，'manual'

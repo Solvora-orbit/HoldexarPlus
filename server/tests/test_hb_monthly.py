@@ -170,6 +170,71 @@ def test_edition_suffix_kept():
     assert hb._clean_name("Forza Horizon 5: Premium Edition") == "forza horizon 5 premium edition"
 
 
+# ─── 0.5.0 Steam 捆绑包联动（搜索页 bundle 锚 + resolve_target 双返回）───
+
+
+def test_parse_search_bundle_rows():
+    from app.domains.metadata import resolver
+
+    page = """
+    <a href="https://store.steampowered.com/app/208650/Batman_Arkham_Knight/" data-ds-appid="208650">
+      <span class="title">Batman: Arkham Knight</span></a>
+    <a href="https://store.steampowered.com/bundle/20515/Batman_Arkham_Collection/" data-ds-bundleid="20515">
+      <span class="title">Batman: Arkham Collection</span></a>
+    """
+    apps = resolver.parse_search_rows(page)
+    bundles = resolver.parse_search_bundle_rows(page)
+    assert apps == [{"id": 208650, "name": "Batman: Arkham Knight"}]
+    assert bundles == [{"id": 20515, "name": "Batman: Arkham Collection"}]
+
+
+def test_pick_bundleid_exact_and_clean():
+    from app.domains.metadata import resolver
+
+    rows = [
+        {"id": 20515, "name": "Batman: Arkham Collection"},
+        {"id": 20516, "name": "Borderlands Collection: Pandora's Box"},
+    ]
+    assert resolver._pick_bundleid("Batman: Arkham Collection", rows) == 20515
+    assert resolver._pick_bundleid("Borderlands Collection: Pandora's Box", rows) == 20516
+    # 合辑名只认 exact/clean——前缀不猜（"Batman" 不落 Arkham Collection）
+    assert resolver._pick_bundleid("Batman", rows) is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_target_bundle_fallback(monkeypatch):
+    """app 全链落空、同页 bundle 行 exact 命中 → (None, bundleid)；
+    app 命中优先于早期 bundle 命中。"""
+    from app.domains.metadata import resolver
+
+    mixed_page = """
+    <a data-ds-bundleid="20515" href="/bundle/20515/"><span class="title">Batman: Arkham Collection</span></a>
+    <a href="/app/208650/" data-ds-appid="208650"><span class="title">Batman: Arkham Knight</span></a>
+    """
+
+    async def no_storesearch(session, term, proxy):
+        return []
+
+    async def page_for(session, term, proxy):
+        return mixed_page
+
+    monkeypatch.setattr(resolver, "_fetch_storesearch", no_storesearch)
+    monkeypatch.setattr(resolver, "_fetch_search_page_raw", page_for)
+
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(resolver.asyncio, "sleep", no_sleep)
+
+    # 条目名 = bundle 名 → app 行（Arkham Knight）五级全不中 → bundle 兜底
+    appid, bundleid = await resolver.resolve_target(None, "Batman: Arkham Collection", None)
+    assert appid is None and bundleid == 20515
+
+    # 条目名 = app 名 → app 优先（同页 bundle 行不作干扰）
+    appid2, bundleid2 = await resolver.resolve_target(None, "Batman: Arkham Knight", None)
+    assert appid2 == 208650 and bundleid2 is None
+
+
 def test_month_page_url_from_machine_name():
     assert hb._month_page_url("september_2026_choice") == \
         "https://www.humblebundle.com/membership/September-2026"

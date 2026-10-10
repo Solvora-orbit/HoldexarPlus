@@ -234,6 +234,43 @@ export const settingsApi = {
   getFetch: () => request<FetchSettingsPayload>('GET', '/settings/fetch'),
   updateFetch: (payload: Partial<FetchSettingsPayload>) =>
     request<FetchSettingsPayload>('PUT', '/settings/fetch', payload),
+  /** 实验性功能总开关（0.5.0）：开启须经前端风险确认弹窗 */
+  getExperimental: () => request<{ enabled: boolean }>('GET', '/settings/experimental'),
+  updateExperimental: (enabled: boolean) =>
+    request<{ enabled: boolean }>('PUT', '/settings/experimental', { enabled }),
+}
+
+// ─── steampy（实验性：游戏 CDK 行情，0.5.0）────────────────────────
+
+/** listHot 行情行（站点公开数据透传；人民币计价，keyPrice = 最低 CDK 价） */
+export interface SteampyHotItem {
+  gameName: string
+  appId: number
+  /** Steam 原价 / 现价 / 史低（元） */
+  oriPrice: number
+  gamePrice: number
+  hisPrice: number
+  /** 折扣率（0.83 = 1.7 折价差口径按站点原样） */
+  discount: number
+  keyPrice: number
+  keySales: number
+  keyAveAmt: number
+  gameAva: string
+}
+
+export interface SteampyHotPayload {
+  enabled: boolean
+  ok?: boolean
+  items: SteampyHotItem[]
+  page: number
+  pageSize: number
+  total?: number
+}
+
+export const steampyApi = {
+  /** 游戏 CDK 行情单页（实验开关关闭时 enabled=false 且 items 空） */
+  hot: (page: number, pageSize: number) =>
+    request<SteampyHotPayload>('GET', `/steampy/hot?page=${page}&pageSize=${pageSize}`),
 }
 
 // ─── pilot（领航员：比价助手问答）────────────────────────
@@ -1521,18 +1558,21 @@ export interface HumbleBundlesPayload {
 }
 
 /** 详情抽屉里的非卡片条目（resolving=解析欠账，ingesting=目录收录中，
- *  not_found=关联尝试已放弃（0.3.2，大概率非 Steam 发行）） */
+ *  not_found=关联尝试已放弃（0.3.2，大概率非 Steam 发行），
+ *  bundle=按 Steam 捆绑包联动（0.5.0，bundleId 指向 bundles 域）） */
 export interface HumblePendingGame {
   appid: number | null
   title: string
-  status: 'resolving' | 'ingesting' | 'not_found'
+  bundleId?: number | null
+  status: 'resolving' | 'ingesting' | 'not_found' | 'bundle'
 }
 
 /** 档位内游戏条目；isNew = 本档新增，unlockPriceCnyFen = 首次出现的档位价
- * （最低解锁门槛，卡片角标免点选可辨价位，0.3.1） */
+ * （最低解锁门槛，卡片角标免点选可辨价位）；bundleId = Steam 捆绑包联动 */
 export interface HumbleTierGame {
   title: string
   appid: number | null
+  bundleId?: number | null
   isNew?: boolean
   unlockPriceCnyFen?: number | null
 }
@@ -1579,10 +1619,11 @@ export const humbleApi = {
 export type PriceMap = Record<string, number>
 
 /** 档位内游戏条目（unlockPriceMap：tiered=该档价 / pick=最低档价 /
- *  HB·GMG 累进=首现档价） */
+ *  HB·GMG 累进=首现档价）；bundleId = Steam 捆绑包联动（0.5.0） */
 export interface StoreTierGame {
   title: string
   appid: number | null
+  bundleId?: number | null
   isNew?: boolean
   unlockPriceMap?: PriceMap | null
 }

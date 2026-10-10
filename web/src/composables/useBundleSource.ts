@@ -141,6 +141,12 @@ export function useBundleSource(
     return ms > 0 ? Math.max(1, Math.ceil(ms / 86400000)) : 0
   }
 
+  /** 远期占位到期（>1 年，站点「永久在售」形态）不显示倒计时徽章（0.5.0） */
+  function isLongRunning(endAt: string | null): boolean {
+    const d = daysLeft(endAt)
+    return d !== null && d > 365
+  }
+
   function urgencyClass(endAt: string | null): string {
     const d = daysLeft(endAt)
     if (d === null) return ''
@@ -219,6 +225,6 @@ export function useBundleSource(
     // 动作
     load, refresh, ingestNow, openBundle, stopPoll,
     // 展示助手
-    period, daysLeft, urgencyClass, humStatusKey, rowStatusKey,
+    period, daysLeft, isLongRunning, urgencyClass, humStatusKey, rowStatusKey,
   }
 }

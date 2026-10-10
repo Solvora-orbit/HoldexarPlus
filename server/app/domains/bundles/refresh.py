@@ -681,6 +681,35 @@ async def import_bundle(text: str) -> dict:
     return result
 
 
+async def ensure_bundle_stored(bundle_id: int) -> bool:
+    """按 bundleid 确保捆绑包已入库（0.5.0 三站联动轻量入口）。
+
+    与 import_bundle 的差异：不识别链接、**不挂 monitoring track**（三站
+    条目联动是数据补全，不是用户主动关注语义）、不 enqueue app 队列（三站
+    各自有收录链管包内 appid）。抓取/落库/排序快照同链复用；幂等——已在库
+    = 单包刷新覆盖。失败返回 False（调用方下轮重试）。"""
+    rates = await get_rates()
+    rate_map = dict(rates) if isinstance(rates, dict) else {}
+    rate_map.setdefault("CNY", 1.0)
+
+    connector = aiohttp.TCPConnector(limit=4, ttl_dns_cache=60)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        regions = await _fetch_bundle_regions(session, bundle_id)
+    if not regions:
+        logger.info("[bundles] 三站联动 bundle %d 抓取失败（留待下轮）", bundle_id)
+        return False
+    now = datetime.utcnow()
+    if not await _upsert_bundle_rows(bundle_id, regions, rate_map, now, allow_singleton=True):
+        return False
+    try:
+        await refresh_bundle_sort_cache([bundle_id])
+    except Exception:  # noqa: BLE001
+        logger.exception("[bundles] 三站联动 bundle %d 排序快照重建失败", bundle_id)
+    invalidate_bundles_cache()
+    logger.info("[bundles] 三站联动 bundle %d 入库（%d 区价格）", bundle_id, len(regions))
+    return True
+
+
 async def _fetch_app_type(
     session: aiohttp.ClientSession, appid: int
 ) -> tuple[str | None, str]:

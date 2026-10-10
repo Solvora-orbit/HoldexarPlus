@@ -13,6 +13,7 @@ const shell: Partial<Record<MessageKey, string>> = {
   'nav.gamelib': 'Game Library',
   'nav.achievements': 'Achievements',
   'nav.bundles': 'Bundles',
+  'nav.steampy': 'Steampy Market',
   'nav.pool': 'Following',
   'nav.family': 'Family',
   'nav.bills': 'Bills',

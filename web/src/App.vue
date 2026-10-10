@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { useAccountStore } from '@/stores/account'
 import { useCrawlStatusStore } from '@/stores/crawlStatus'
+import { useExperimental } from '@/stores/experimental'
 import { useFactNoticesStore } from '@/stores/factNotices'
 import { useLocaleStore } from '@/stores/locale'
 import { usePilotStore } from '@/stores/pilot'
@@ -53,6 +54,7 @@ const localeStore = useLocaleStore()
 const accountStore = useAccountStore()
 const pilotStore = usePilotStore()
 const updaterStore = useUpdaterStore()
+const { enabled: experimentalEnabled, load: loadExperimental } = useExperimental()
 const { t } = useI18n()
 onMounted(() => {
   crawl.start()
@@ -60,6 +62,8 @@ onMounted(() => {
   factNotices.start()
   settingsStore.load()
   accountStore.load()
+  // 实验功能开关（0.5.0）：开启时侧栏才渲染 Steampy 实验页
+  void loadExperimental()
   // 闲时预热成就殿堂视图 chunk（内含 echarts 大包）：只在浏览器空闲时跑、
   // 不设强制期限——首屏加载与请求链完成前不与当前页争抢
   const warmAchievements = () => { void import('./views/achievements/Index.vue') }
@@ -203,6 +207,10 @@ const navGroups = computed<HlSideNavGroup[]>(() => [
       { label: t('nav.bills'), to: '/bills', icon: 'list', hue: -36 },
       { label: t('nav.events'), to: '/events', icon: 'calendar', hue: 40 },
       { label: t('nav.achievements'), to: '/achievements', icon: 'trophy', hue: -12 },
+      // Steampy 实验页（0.5.0）：仅实验开关开启后渲染（设置页风险确认开启）
+      ...(experimentalEnabled.value
+        ? [{ label: t('nav.steampy'), to: '/steampy', icon: 'gift' as const, hue: 60 }]
+        : []),
     ],
   },
   {

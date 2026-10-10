@@ -21,6 +21,17 @@ SLUG_P = "fantest-pick"          # 选择包（数量档 + 全池）
 APP_T1 = 1796470
 APP_P1 = 1151340
 
+
+def _as_target(fake):
+    """旧 appid 打桩 → resolve_target 适配（0.5.0 接缝；bundle 侧恒 None）。"""
+
+    async def wrapper(session, title, proxy):
+        r = await fake(session, title, proxy)
+        return (r, None) if isinstance(r, int) else (None, None)
+
+    return wrapper
+
+
 _END = 1791982440  # 未来时刻（在售）
 
 
@@ -150,7 +161,7 @@ def _stub_full_chain(monkeypatch) -> None:
     async def fake_algolia(session, proxy, key):
         return _algolia_hits()
 
-    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", fake_resolve)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", _as_target(fake_resolve))
     monkeypatch.setattr(fnt, "_get_text", fake_get_text)
     monkeypatch.setattr(fnt, "_get_json", fake_get_json)
     monkeypatch.setattr(fnt, "_algolia_query", fake_algolia)
@@ -234,7 +245,7 @@ async def test_refresh_upsert_games_and_tiers(monkeypatch):
         return [{"id": 9}]
 
     _stub_full_chain(monkeypatch)
-    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", fake_resolve)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", _as_target(fake_resolve))
     monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run_sequential)
 
     res = await fnt.refresh_fanatical_bundles()
@@ -283,6 +294,50 @@ async def test_refresh_upsert_games_and_tiers(monkeypatch):
     # 收录扫描：三个已关联 appid（Alpha/Beta/Pool One）均无 games 行 → 一次批量登记
     assert res["items"] == 5
     assert ingest_calls and sorted(ingest_calls[0]) == sorted([APP_T1, APP_P1, 2221390])
+
+
+@pytest.mark.asyncio
+async def test_bundle_linkage_on_app_miss(monkeypatch):
+    """0.5.0 bundle 联动：检索兜底 app 落空但 bundle 命中 → 复用 bundles 域
+    入库 + 条目落 bundle_id，详情载荷出第四态 'bundle'（档位条目带 bundleId）。"""
+    ensure_calls: list[int] = []
+
+    async def fake_resolve(session, title, proxy):
+        # Beta Game：app 查不到、bundle 命中
+        if title == "Beta Game":
+            return (None, 20515)
+        return (None, None)
+
+    async def fake_ensure(bundle_id: int) -> bool:
+        ensure_calls.append(bundle_id)
+        return True
+
+    _stub_full_chain(monkeypatch)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", fake_resolve)
+    monkeypatch.setattr("app.domains.bundles.refresh.ensure_bundle_stored", fake_ensure)
+
+    res = await fnt.refresh_fanatical_bundles()
+    assert res["ok"] is True
+    assert ensure_calls == [20515]
+    async with get_session_factory()() as session:
+        games_t = (
+            await session.execute(
+                select(FanaticalBundleGame).where(FanaticalBundleGame.slug == SLUG_T)
+            )
+        ).scalars().all()
+        by_title = {g.title: g for g in games_t}
+        assert by_title["Beta Game"].appid is None
+        assert by_title["Beta Game"].bundle_id == 20515
+        assert by_title["Beta Game"].resolve_attempts == 0  # bundle 命中不算失败
+
+    d = await fnt.bundle_detail(SLUG_T)
+    assert d is not None
+    pending_t = {p["title"]: p for p in d["pending"]}
+    assert pending_t["Beta Game"]["status"] == "bundle"
+    assert pending_t["Beta Game"]["bundleId"] == 20515
+    tiers_t = d["tiers"][1]["games"]
+    beta = next(g for g in tiers_t if g["title"] == "Beta Game")
+    assert beta["bundleId"] == 20515 and beta["appid"] is None
 
 
 @pytest.mark.asyncio

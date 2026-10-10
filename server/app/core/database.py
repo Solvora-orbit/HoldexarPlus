@@ -247,6 +247,15 @@ _TABLE_EXTRA_COLUMNS: dict[str, dict[str, str]] = {    "games": {
     # 仍失败 → 抽屉标「未找到」（大概率非 Steam 发行），停止空转重试
     "humble_bundle_games": {
         "resolve_attempts": "INTEGER DEFAULT 0",
+        # Steam 捆绑包引用（0.5.0）：app 检索不到、按 bundle 命中的条目
+        "bundle_id": "INTEGER",
+    },
+    # F 站/GMG 条目表（0.4.0 新建）存量库补 Steam 捆绑包引用列（0.5.0）
+    "fanatical_bundle_games": {
+        "bundle_id": "INTEGER",
+    },
+    "gmg_bundle_games": {
+        "bundle_id": "INTEGER",
     },
     # 价格周期的阶段时刻与生产统计（统计口径见 crawl/stats.py）：
     # 统计列全为 NULL = 本轮没留下统计（未收敛 / 进程中断）

@@ -48,6 +48,7 @@ from app.domains.metadata.resolver import (  # noqa: F401 —— 再导出：测
     _query_terms,
     normalize_title,
     resolve_appid as _resolve_appid_impl,
+    resolve_target as _resolve_target_impl,
 )
 from app.crawler.epic_free import (
     fetch_free_games,
@@ -415,6 +416,15 @@ async def _resolve_appid(
     主标题段降词链、归一化五级匹配。保留本模块符号作为唯一接缝——humble/
     fanatical/gmg 各域与测试 monkeypatch 都挂这个名字。"""
     return await _resolve_appid_impl(session, title, proxy)
+
+
+async def _resolve_target(
+    session: aiohttp.ClientSession, title: str, proxy: str | None
+) -> tuple[int | None, int | None]:
+    """条目标题 → (appid, bundleid)（0.5.0）：同一搜索页同时解析两路，
+    bundle 仅在 app 全链落空时兜底返回（app 命中优先）。三站查不到 app 的
+    条目（Complete Edition 合辑等）按 Steam 捆绑包联动入库与展示。"""
+    return await _resolve_target_impl(session, title, proxy)
 
 
 async def _mark_game_hb(appid: int, title: str, label: str) -> None:

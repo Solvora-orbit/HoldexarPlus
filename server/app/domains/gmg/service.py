@@ -384,23 +384,33 @@ async def _sync_bundle_detail(
             await s.execute(
                 select(
                     GmgBundleGame.title, GmgBundleGame.appid,
-                    GmgBundleGame.resolve_attempts,
+                    GmgBundleGame.resolve_attempts, GmgBundleGame.bundle_id,
                 ).where(GmgBundleGame.slug == bundle.slug)
             )
         ).all()
-    resolved_known = {t for t, a, _n in rows if a is not None}
-    pending_known = {t for t, a, _n in rows if a is None}
-    exhausted = {t for t, a, n in rows if a is None and int(n or 0) >= _RESOLVE_MAX_ATTEMPTS}
-    to_resolve = [t for t in titles if t not in resolved_known and t not in exhausted]
+    resolved_known = {t for t, a, _n, _b in rows if a is not None}
+    bundle_known = {t for t, _a, _n, b in rows if b is not None}
+    pending_known = {t for t, a, _n, _b in rows if a is None}
+    exhausted = {
+        t for t, a, n, b in rows
+        if a is None and b is None and int(n or 0) >= _RESOLVE_MAX_ATTEMPTS
+    }
+    to_resolve = [
+        t for t in titles
+        if t not in resolved_known and t not in exhausted and t not in bundle_known
+    ]
 
     resolved: dict[str, int] = {}
+    resolved_bundle: dict[str, int] = {}
     unresolved: list[str] = []
     for title in to_resolve:
-        appid = await metadata_service._resolve_appid(session, title, proxy)
-        if appid is None:
-            unresolved.append(title)
-        else:
+        appid, bundleid = await metadata_service._resolve_target(session, title, proxy)
+        if appid is not None:
             resolved[title] = appid
+        elif bundleid is not None:
+            resolved_bundle[title] = bundleid
+        else:
+            unresolved.append(title)
         await asyncio.sleep(0.3)
 
     need_ingest: list[int] = []
@@ -429,16 +439,25 @@ async def _sync_bundle_detail(
                 .values(updated_at=now)
             )
         existing = {
-            t: a for t, a in await s.execute(
-                select(GmgBundleGame.title, GmgBundleGame.appid).where(
-                    GmgBundleGame.slug == bundle.slug
-                )
+            t: (a, b) for t, a, b in await s.execute(
+                select(
+                    GmgBundleGame.title, GmgBundleGame.appid, GmgBundleGame.bundle_id,
+                ).where(GmgBundleGame.slug == bundle.slug)
             )
         }
+        # bundle 联动入库（0.5.0）：命中 bundleid 的条目复用 bundles 域抓取
+        # 落库（不挂 monitoring track）；失败仍落 bundle_id 引用，下轮重试
+        for title, bid in resolved_bundle.items():
+            try:
+                from app.domains.bundles import refresh as bundles_refresh
+
+                await bundles_refresh.ensure_bundle_stored(bid)
+            except Exception:  # noqa: BLE001
+                logger.exception("[gmg-bundles] bundle %d 联动入库异常", bid)
         for title in titles:
             if title in resolved:
                 if title in existing:
-                    if existing[title] is None:
+                    if existing[title][0] is None:
                         await s.execute(
                             update(GmgBundleGame)
                             .where(GmgBundleGame.slug == bundle.slug,
@@ -447,6 +466,20 @@ async def _sync_bundle_detail(
                         )
                 else:
                     s.add(GmgBundleGame(slug=bundle.slug, appid=resolved[title], title=title))
+            elif title in resolved_bundle:
+                bid = resolved_bundle[title]
+                if title in existing:
+                    if existing[title][1] is None:
+                        await s.execute(
+                            update(GmgBundleGame)
+                            .where(GmgBundleGame.slug == bundle.slug,
+                                   GmgBundleGame.title == title)
+                            .values(bundle_id=bid)
+                        )
+                else:
+                    s.add(GmgBundleGame(
+                        slug=bundle.slug, appid=None, bundle_id=bid, title=title,
+                    ))
             elif title not in existing:
                 s.add(GmgBundleGame(
                     slug=bundle.slug, appid=None, title=title,
@@ -460,7 +493,10 @@ async def _sync_bundle_detail(
                     .values(resolve_attempts=GmgBundleGame.resolve_attempts + 1)
                 )
         title_set = set(titles)
-        stale_unresolved = [t for t in existing if t not in title_set and existing[t] is None]
+        stale_unresolved = [
+            t for t, (a, b) in existing.items()
+            if t not in title_set and a is None and b is None
+        ]
         if stale_unresolved:
             for g in (
                 await s.execute(
@@ -729,11 +765,11 @@ async def bundle_detail(slug: str) -> dict | None:
             await s.execute(
                 select(
                     GmgBundleGame.appid, GmgBundleGame.title,
-                    GmgBundleGame.resolve_attempts,
+                    GmgBundleGame.resolve_attempts, GmgBundleGame.bundle_id,
                 ).where(GmgBundleGame.slug == slug)
             )
         ).all()
-        appids = [int(a) for a, _t, _n in rows if a is not None]
+        appids = [int(a) for a, _t, _n, _b in rows if a is not None]
         have: set[int] = set()
         if appids:
             have = {
@@ -744,19 +780,24 @@ async def bundle_detail(slug: str) -> dict | None:
     pending = [
         {
             "appid": int(a) if a is not None else None, "title": title,
+            "bundleId": int(b) if b is not None else None,
             "status": (
-                "not_found"
+                "bundle"
+                if a is None and b is not None
+                else "not_found"
                 if a is None and int(n or 0) >= _RESOLVE_MAX_ATTEMPTS
                 else "ingesting" if a is not None and int(a) not in have
                 else "resolving"
             ),
         }
-        for a, title, n in rows
+        for a, title, n, b in rows
         if a is None or int(a) not in have
     ]
     title_appid: dict[str, int | None] = {}
-    for a, title, _n in rows:
+    title_bundle: dict[str, int | None] = {}
+    for a, title, _n, b in rows:
         title_appid.setdefault(title, int(a) if a is not None else None)
+        title_bundle.setdefault(title, int(b) if b is not None else None)
 
     # 累进档位展开（与 humble 同语义）：每档 games = 买该档实拿全部，
     # newGames = 本档新增，unlockPriceMap = 首现档价
@@ -778,6 +819,7 @@ async def bundle_detail(slug: str) -> dict | None:
                     new_titles.append(x)
             news = [
                 {"title": x, "appid": title_appid.get(x),
+                 "bundleId": title_bundle.get(x),
                  "unlockPriceMap": t.get("price_map")}
                 for x in new_titles
             ]
