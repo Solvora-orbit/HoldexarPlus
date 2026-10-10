@@ -17,8 +17,8 @@ from app.domains.steampy import service as spy  # noqa: E402
 _HOT_PAGE = {
     "success": True,
     "result": {
-        "total": 2,
-        "list": [
+        "totalElements": 2,
+        "content": [
             {
                 "gameName": "双人成行", "appId": "1426210", "oriPrice": 198.0,
                 "gamePrice": 198.0, "hisPrice": 39.6, "discount": 0.83,
@@ -78,7 +78,7 @@ def _clean_state(monkeypatch):
 
 
 def test_normalize_item_shapes():
-    ok = spy._normalize_item(_HOT_PAGE["result"]["list"][0])
+    ok = spy._normalize_item(_HOT_PAGE["result"]["content"][0])
     assert ok is not None
     assert ok["appId"] == 1426210 and ok["keyPrice"] == 39.6 and ok["keySales"] == 3
     assert spy._normalize_item({"gameName": "", "appId": "1"}) is None

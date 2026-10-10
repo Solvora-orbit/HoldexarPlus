@@ -135,10 +135,14 @@ async def fetch_hot_page(page: int = 1, page_size: int = 20) -> dict | None:
                 await asyncio.sleep(3)
     if not isinstance(payload, dict):
         return None
+    # xboot 标准分页：content/totalElements（调研纪要里的 list 是误记，实测 2026-10-11）
     items = [
-        item for item in (_normalize_item(r) for r in payload.get("list") or [])
+        item for item in (_normalize_item(r) for r in payload.get("content") or [])
         if item is not None
     ]
     _CACHE[page] = (now, items)
-    total = int(payload.get("total") or 0)
+    try:
+        total = int(payload.get("totalElements") or 0)
+    except (TypeError, ValueError):
+        total = 0
     return {"items": items, "page": page, "pageSize": page_size, "total": total}
