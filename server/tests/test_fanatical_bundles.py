@@ -26,10 +26,15 @@ _END = 1791982440  # 未来时刻（在售）
 
 def _algolia_hits() -> list[dict]:
     """两包命中：tiered（两档独立集合）+ pick（池挂首档）；附一条 mystery 与
-    一条 book-bundle 验证过滤。价格 map 全 7 币种形态（主单位，JPY ×100）。"""
+    一条 book-bundle 验证过滤。价格 map 全 7 币种形态（主单位，JPY ×100）。
 
-    def tier_product(name: str, sid: int | None) -> dict:
-        return {"name": name, "steamId": sid, "steamIdType": "app"}
+    0.4.1 判据字段：steamId 缺失但 drm 含 steam = 检索兜底；无 drm = 直标。"""
+
+    def tier_product(name: str, sid: int | None, drm: list | None = None) -> dict:
+        p = {"name": name, "steamId": sid, "steamIdType": "app"}
+        if drm is not None:
+            p["drm"] = drm
+        return p
 
     return [
         {
@@ -40,10 +45,12 @@ def _algolia_hits() -> list[dict]:
             "available_valid_from": 1788354000, "available_valid_until": _END,
             "game_total": 3,
             "bundle_tiers": [
-                {"displayTotal": 1, "products": [tier_product("Alpha Game", APP_T1)]},
+                {"displayTotal": 1, "products": [tier_product("Alpha Game", APP_T1, ["steam"])]},
                 {"displayTotal": 2, "products": [
-                    tier_product("Beta Game", 2221390),
-                    tier_product("Gamma PDF", None),  # 非 Steam 条目
+                    # steamId 缺失但 drm=steam：检索兜底应恢复（0.4.1）
+                    tier_product("Beta Game", None, ["steam"]),
+                    # 无 drm（站点未声明 Steam）：确知非 Steam 直标
+                    tier_product("Gamma PDF", None),
                 ]},
             ],
         },
@@ -55,8 +62,9 @@ def _algolia_hits() -> list[dict]:
             "available_valid_until": _END, "game_total": 2,
             "bundle_tiers": [
                 {"displayTotal": 5, "products": [
-                    tier_product("Pool Game One", APP_P1),
-                    tier_product("Pool Ebook", None),
+                    tier_product("Pool Game One", APP_P1, ["steam"]),
+                    # 合辑 SKU（即使 drm=steam）：直标不烧检索
+                    tier_product("Great Double-Pack", None, ["steam"]),
                 ]},
                 {"displayTotal": 7, "products": []},
             ],
@@ -122,7 +130,12 @@ def _patch_network(monkeypatch):
 
 
 def _stub_full_chain(monkeypatch) -> None:
-    """打桩整条刷新链（Algolia 两包 + pick 价格 + tiered 详情价）。"""
+    """打桩整条刷新链（Algolia 两包 + pick 价格 + tiered 详情价）。
+    resolver 默认桩返回 None（ drm=steam 缺 id 的条目走 attempts 记账），
+    需要特定结果的测试在调用后再覆盖。"""
+
+    async def fake_resolve(session, title, proxy):
+        return None
 
     async def fake_get_text(session, proxy, url, headers):
         return "window.searchKey = 'abc';"
@@ -137,6 +150,7 @@ def _stub_full_chain(monkeypatch) -> None:
     async def fake_algolia(session, proxy, key):
         return _algolia_hits()
 
+    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", fake_resolve)
     monkeypatch.setattr(fnt, "_get_text", fake_get_text)
     monkeypatch.setattr(fnt, "_get_json", fake_get_json)
     monkeypatch.setattr(fnt, "_algolia_query", fake_algolia)
@@ -160,8 +174,8 @@ def test_parse_hits_filters_and_kinds():
     assert t["end_at"] is not None and t["end_at"].year == 2026
     p = rows[1]
     assert p["kind"] == "pick"
-    assert [x for tier in p["tiers"] for x in tier["titles"]] == ["Pool Game One", "Pool Ebook"]
-    assert {"name": "Pool Game One", "steamId": APP_P1, "steamIdType": "app"} in p["steam_products"]
+    assert [x for tier in p["tiers"] for x in tier["titles"]] == ["Pool Game One", "Great Double-Pack"]
+    assert {"name": "Pool Game One", "steamId": APP_P1, "steamIdType": "app", "drm": ["steam"]} in p["steam_products"]
 
 
 def test_price_map_minor_and_min():
@@ -205,18 +219,28 @@ def test_merge_tiers_and_mismatch_guard():
 @pytest.mark.asyncio
 async def test_refresh_upsert_games_and_tiers(monkeypatch):
     """全链：Algolia 列表 → upsert → pick 价格 → tiered 详情价 → 条目直取
-    appid / 非 Steam 直置满 → 档位与条目计数落库 → 收录扫描登记。"""
+    appid / drm 权威判据（steamId 缺走检索兜底、无 drm 直标、合辑直标）→
+    档位与条目计数落库 → 收录扫描登记。"""
     ingest_calls: list[list[int]] = []
+    resolve_calls: list[str] = []
+
+    async def fake_resolve(session, title, proxy):
+        resolve_calls.append(title)
+        # 检索兜底：Beta Game 恢复，Others 查不到（attempts 记账）
+        return 2221390 if title == "Beta Game" else None
 
     async def fake_run_sequential(specs, **_):
         ingest_calls.append(list(specs[0]["appids"]))
         return [{"id": 9}]
 
     _stub_full_chain(monkeypatch)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_appid", fake_resolve)
     monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run_sequential)
 
     res = await fnt.refresh_fanatical_bundles()
     assert res["ok"] is True and res["listed"] == 2
+    # 检索兜底只打 drm=steam 且缺 id 的条目（Beta Game；合辑被拦不烧检索）
+    assert resolve_calls == ["Beta Game"]
     async with get_session_factory()() as session:
         t = await session.get(FanaticalBundle, SLUG_T)
         assert t is not None and t.kind == "tiered" and t.on_sale is True
@@ -233,7 +257,9 @@ async def test_refresh_upsert_games_and_tiers(monkeypatch):
         by_title = {g.title: g for g in games_t}
         assert by_title["Alpha Game"].appid == APP_T1
         assert by_title["Alpha Game"].resolve_attempts == 0
-        # 非 Steam 条目：attempts 直置满 → not_found
+        # steamId 缺 + drm=steam：检索兜底恢复关联（0.4.1 根修）
+        assert by_title["Beta Game"].appid == 2221390
+        # 无 drm：确知非 Steam 直置满 → not_found
         assert by_title["Gamma PDF"].appid is None
         assert by_title["Gamma PDF"].resolve_attempts == fnt.RESOLVE_MAX_ATTEMPTS
         assert t.game_count == 3
@@ -250,8 +276,11 @@ async def test_refresh_upsert_games_and_tiers(monkeypatch):
         assert len(games_p) == 2
         by_title_p = {g.title: g for g in games_p}
         assert by_title_p["Pool Game One"].appid == APP_P1
-        assert by_title_p["Pool Ebook"].resolve_attempts == fnt.RESOLVE_MAX_ATTEMPTS
-    # 收录扫描：三个 appid（Alpha/Beta/Pool One）均无 games 行 → 一次批量登记
+        # 合辑 SKU：即使 drm=steam 也直标（无单 app 对应，不烧检索）
+        assert by_title_p["Great Double-Pack"].appid is None
+        assert by_title_p["Great Double-Pack"].resolve_attempts == fnt.RESOLVE_MAX_ATTEMPTS
+        assert "Great Double-Pack" not in resolve_calls
+    # 收录扫描：三个已关联 appid（Alpha/Beta/Pool One）均无 games 行 → 一次批量登记
     assert res["items"] == 5
     assert ingest_calls and sorted(ingest_calls[0]) == sorted([APP_T1, APP_P1, 2221390])
 
@@ -319,6 +348,22 @@ async def test_mark_seen_and_list(monkeypatch):
     assert await fnt.mark_seen("fantest-unknown") is False
 
 
+def test_combo_sku_detection():
+    """0.4.1 合辑 SKU 拦截：Double/Triple Pack、A + B、Pack/Bundle/Collection
+    收尾——站点自造 SKU 无单 app 对应，直标不烧检索；真实游戏名不误伤。"""
+    assert fnt.is_combo_sku("Action-Roguelike Fantasy Double-Pack")
+    assert fnt.is_combo_sku("AMID EVIL & DUSK Double Pack")
+    assert fnt.is_combo_sku("Rogue Trooper, AvP Classic 2000 & Dredd Triple Pack")
+    assert fnt.is_combo_sku("Balrum + Deepest Chamber: Resurrection Pack")
+    assert fnt.is_combo_sku("Point and Click Premium Bundle")
+    assert fnt.is_combo_sku("Nobodies: Complete Bundle")
+    assert fnt.is_combo_sku("Alt F-4 Pack")
+    assert not fnt.is_combo_sku("Dreamscaper")
+    assert not fnt.is_combo_sku("Teslagrad 2")
+    assert not fnt.is_combo_sku("Police Stories - Complete Edition")
+    assert not fnt.is_combo_sku("Coromon Deluxe Edition")
+
+
 def test_extract_search_key():
     assert fnt.extract_search_key("window.searchKey = 'abc123';") == "abc123"
     assert fnt.extract_search_key('window.searchKey="double"') is None  # 只认单引号形态
@@ -346,8 +391,9 @@ async def test_ingest_scan_skips_existing(monkeypatch):
         await s.commit()
     calls.clear()
     res = await fnt.scan_missing_ingest()
-    assert res["candidates"] == 2  # Beta Game 与 Pool One（Alpha 已入目录）
-    assert sorted(calls[0]) == sorted([APP_P1, 2221390])
+    # Alpha/Pool One 直取关联 → 候选；Beta Game 缺 steamId 检索未中（attempts=1）不入候选
+    assert res["candidates"] == 1
+    assert calls == [[APP_P1]]
     # 爬虫占用（返回空）→ queued 0
     async def busy(specs, **_):
         return []

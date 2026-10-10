@@ -45,7 +45,9 @@ _STORE_HEADERS = {
 _TRADEMARK_RE = re.compile(r"\s*\-\s*pc edition|\s*\(pc\)|\s*\(windows\)|\s*windows edition|\s*xbox one|\s*xbox series x\|s")
 _EDITION_RE = re.compile(
     r"\s*standard edition|\s*game of the year edition|\s*anniversary edition|\s*complete edition"
-    r"|\s*deluxe edition|\s*definitive edition|\s*remastered|\s*director's cut|\s*ultimate edition",
+    r"|\s*digital deluxe edition|\s*deluxe edition|\s*definitive edition|\s*remastered"
+    r"|\s*director's cut|\s*ultimate edition|\s*premium edition|\s*legendary edition"
+    r"|\s*golden edition|\s*enhanced edition",
     re.IGNORECASE,
 )
 
@@ -135,10 +137,13 @@ def _pick_appid(title: str, hits: list[dict]) -> int | None:
 
 # ── 检索源 ────────────────────────────────────────────────────────
 
-# 查询词链：剥符号后的整名 → 主标题段 → 前 2 词 → 首词（非空且不重复才收）。
-# 主标题段 = 原题按冒号/间隔号/空格间隔符切首段：副标题差异（Terrordrome
-# "- Reign of the Legends"）不拖累检索；"Rivals of Aether II" 这类尾巴
-# 带续作号的长名靠搜索页兜底而非砍词（砍尾词会撞前作）。
+# 查询词链：剥符号后的整名 → **剥版本词后的整名** → 主标题段 → 前 2 词 →
+# 首词（非空且不重复才收）。剥版本词档（0.4.1）：GMG/F 站条目惯用
+# "Premium/Legendary/Deluxe Edition" 后缀，商店侧是本体或同词条目——整名
+# 查询返回序里本体可能被同类挤出首屏（Batman Arkham Knight Premium Edition
+# 实测 storesearch 直接空），剥掉版本词再查必中本体位。主标题段 = 原题按
+# 冒号/间隔号/空格间隔符切首段：副标题差异不拖累检索；"Rivals of Aether II"
+# 这类尾巴带续作号的长名靠搜索页兜底而非砍词（砍尾词会撞前作）。
 _QUERY_SPLIT_RE = re.compile(r"\s+[-–—]\s+|[:：|~·]")
 
 
@@ -153,6 +158,9 @@ def _query_terms(title: str) -> list[str]:
             out.append(t)
 
     _add(tokens)
+    stripped = _EDITION_RE.sub("", f" {title}")
+    if stripped.strip().lower() != (title or "").strip().lower():
+        _add(re.sub(r"[^\w\s]", " ", stripped).split())
     seg = _QUERY_SPLIT_RE.split(title or "", 1)[0]
     if seg.strip() and seg.strip() != (title or "").strip():
         _add(re.sub(r"[^\w\s]", " ", seg).split())

@@ -45,6 +45,7 @@ from app.domains.metadata.resolver import (  # noqa: F401 —— 再导出：测
     _NON_CORE_RE,
     _clean_name,
     _pick_appid,
+    _query_terms,
     normalize_title,
     resolve_appid as _resolve_appid_impl,
 )

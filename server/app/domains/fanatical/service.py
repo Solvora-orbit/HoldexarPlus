@@ -405,22 +405,56 @@ async def _upsert_bundles(rows: list[dict]) -> int:
     return len(slugs)
 
 
-async def _sync_bundle_games(bundle_slug: str, row: dict) -> int:
-    """包内条目入库：appid 直取（steamId int 且 app 型）；缺 steamId = 确知
-    非 Steam，attempts 直置满标「未找到」（无检索重试链）。返回条目数。"""
+# 站点自造合辑 SKU（不是单个 Steam app，检索也查不到单一条目）：
+# Double/Triple Pack、"A + B" 组合、以 Pack/Bundle/Collection 收尾。
+# 命中即直标 not_found，不烧检索额度（真实游戏极少以这些词收尾）。
+_COMBO_SKU_RE = re.compile(
+    r"double[- ]pack|triple[- ]pack|\s\+\s|\s&\s|\s(?:pack|bundle|collection)$",
+    re.IGNORECASE,
+)
+
+
+def is_combo_sku(title: str) -> bool:
+    return bool(_COMBO_SKU_RE.search(title or ""))
+
+
+async def _sync_bundle_games(
+    session: aiohttp.ClientSession, proxy: str | None, bundle_slug: str, row: dict,
+) -> int:
+    """包内条目入库（0.4.1 判据修正）：appid 直取优先；steamId 缺失时以
+    **drm 字段**为权威——drm 含 steam = Steam 键商品（Algolia 索引常缺
+    steamId，实测 Saint Kotar/Dreamscaper 等全是 drm:["steam"] + 空串 id），
+    走统一检索引擎兜底（attempts 记账，与 HB/GMG 同账本）；drm 不含 steam
+    = 确知非 Steam，直置满；合辑 SKU（Double/Triple Pack、A + B、Pack/
+    Bundle/Collection 收尾）无单 app 对应，直置满不烧检索。返回条目数。"""
+    from app.domains.metadata import service as metadata_service
 
     titles = list(dict.fromkeys(
         t for tier in row["tiers"] for t in tier["titles"]
     ))
-    # 名称 → appid 映射（Algolia bundle_tiers[].products 的 steamId 直取）
+    # 名称 → (直取 appid | 是否 Steam 发行)；drm 是列表（如 ["steam"]）
     steam_map: dict[str, int | None] = {name: None for name in titles}
-    for tier in row.get("steam_products") or []:
-        name = str(tier.get("name") or "").strip()
+    on_steam: dict[str, bool] = {name: False for name in titles}
+    for p in row.get("steam_products") or []:
+        name = str(p.get("name") or "").strip()
         if name not in steam_map:
             continue
-        sid = tier.get("steamId")
-        sid_type = str(tier.get("steamIdType") or "app")
-        steam_map[name] = int(sid) if isinstance(sid, int) and sid > 0 and sid_type == "app" else None
+        sid = p.get("steamId")
+        sid_type = str(p.get("steamIdType") or "app")
+        if isinstance(sid, int) and sid > 0 and sid_type == "app":
+            steam_map[name] = sid
+        drm = p.get("drm") or []
+        on_steam[name] = isinstance(drm, list) and "steam" in [str(d).lower() for d in drm]
+
+    # 需要检索兜底的标题：无直取 appid、站点表明是 Steam 商品、非合辑 SKU
+    to_resolve = [
+        t for t in titles
+        if steam_map.get(t) is None and on_steam.get(t) and not is_combo_sku(t)
+    ]
+    resolved: dict[str, int] = {}
+    for title in to_resolve:
+        resolved[title] = await metadata_service._resolve_appid(session, title, proxy) or 0
+        await asyncio.sleep(0.3)
 
     async with write_gate(WritePriority.BACKGROUND, label="fanatical_games"), \
             get_session_factory()() as s:
@@ -431,8 +465,13 @@ async def _sync_bundle_games(bundle_slug: str, row: dict) -> int:
             )
         }
         for title in titles:
-            appid = steam_map.get(title)
-            attempts = 0 if appid is not None else RESOLVE_MAX_ATTEMPTS
+            direct = steam_map.get(title)
+            appid = direct or resolved.get(title) or None
+            # 直标 not_found 仅限：确知非 Steam / 合辑 SKU（检索兜底失败的
+            # 走 attempts 账本自然到顶，不在此置满）
+            known_missing = steam_map.get(title) is None and (
+                not on_steam.get(title) or is_combo_sku(title)
+            )
             if title in existing:
                 if existing[title] is None and appid is not None:
                     await s.execute(
@@ -441,8 +480,8 @@ async def _sync_bundle_games(bundle_slug: str, row: dict) -> int:
                                FanaticalBundleGame.title == title)
                         .values(appid=appid)
                     )
-                elif appid is None:
-                    # 非 Steam 条目 attempts 幂等置满（不覆盖已有 appid 的行）
+                elif appid is None and known_missing:
+                    # 确知非 Steam / 合辑：attempts 幂等置满（不覆盖已有 appid）
                     await s.execute(
                         update(FanaticalBundleGame)
                         .where(FanaticalBundleGame.slug == bundle_slug,
@@ -452,8 +491,26 @@ async def _sync_bundle_games(bundle_slug: str, row: dict) -> int:
                     )
             else:
                 s.add(FanaticalBundleGame(
-                    slug=bundle_slug, appid=appid, title=title, resolve_attempts=attempts,
+                    slug=bundle_slug, appid=appid, title=title,
+                    resolve_attempts=(
+                        0 if appid is not None
+                        else RESOLVE_MAX_ATTEMPTS if known_missing
+                        else 1 if title in to_resolve
+                        else 0
+                    ),
                 ))
+        # 检索兜底失败的既有行：attempts+1（与 HB/GMG 账本同语义；达上限后
+        # to_resolve 不再拾取——下一轮起 not_found）
+        failed = [t for t in to_resolve if resolved.get(t) is None or resolved[t] == 0]
+        for title in failed:
+            if title in existing:
+                await s.execute(
+                    update(FanaticalBundleGame)
+                    .where(FanaticalBundleGame.slug == bundle_slug,
+                           FanaticalBundleGame.title == title,
+                           FanaticalBundleGame.appid.is_(None))
+                    .values(resolve_attempts=FanaticalBundleGame.resolve_attempts + 1)
+                )
         count_sq = (
             select(func.count())
             .select_from(FanaticalBundleGame)
@@ -520,7 +577,7 @@ async def refresh_fanatical_bundles() -> dict:
                             )
                         )
                         await s.commit()
-                synced += await _sync_bundle_games(row["slug"], row)
+                synced += await _sync_bundle_games(session, proxy, row["slug"], row)
                 await asyncio.sleep(0.3)
         # 刷新尾跑一轮收录扫描（与 humble 同构）：本轮解析出的未入目录 appid
         # 批量登记首爬；收录链独立于抓取，调度器另有每日一拍

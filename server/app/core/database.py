@@ -359,7 +359,7 @@ def _ensure_schema(sync_conn) -> None:
 #   2. _MIGRATIONS 追加 (版本号, 描述, SQL 列表)；SQL 须幂等（中断续跑 +
 #      用户库版本乱序防御），复杂逻辑可登记 async fn(engine) 同位元素
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 # 零小数货币（Steam 以整数计价）：旧捆绑包链路的除数表按 1 处理，与「统一存分」
 # 的新约定差 100 倍——v2 归一的目标集合
@@ -922,6 +922,26 @@ async def _migrate_resolve_attempts_reset(conn) -> None:
     ))
 
 
+async def _migrate_fanatical_attempts_reset(conn) -> None:
+    """v15：Fanatical 关联判据修正（0.4.1 drm 权威 + 检索兜底）后重置尝试。
+
+    0.4.0 首版把 Algolia 索引缺 steamId 的条目一律直标非 Steam（dev 库实证
+    58 条，drm:["steam"] 的真实 Steam 商品被误杀——站点索引常缺 id 字段）；
+    新判据以 drm 为权威、缺 id 走统一检索引擎兜底，合辑 SKU（Double/Triple
+    Pack、A + B、Pack/Bundle 收尾）由新规则重新直标。幂等：只动未解析行。
+    带表存在守卫（同 v13 模式）。"""
+    from sqlalchemy import text
+
+    has_table = await conn.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='fanatical_bundle_games'")
+    )
+    if has_table.first() is None:
+        return
+    await conn.execute(text(
+        "UPDATE fanatical_bundle_games SET resolve_attempts = 0 WHERE appid IS NULL"
+    ))
+
+
 # (目标版本, 说明, 迁移体)：迁移体 = SQL 语句列表，或 async callable(engine)
 _MIGRATIONS: list[tuple[int, str, object]] = [
     (2, "bundle_region_prices 零小数货币单位归一（元→分 + cny_fen 去虚高）",
@@ -977,6 +997,9 @@ _MIGRATIONS: list[tuple[int, str, object]] = [
     (14, "humble_bundle_games.resolve_attempts 重置（0.4.0 检索引擎升级：storesearch"
          " 弱检索期烧光尝试的欠账行吃新引擎红利，真非 Steam 条目自然回落 not_found）",
      _migrate_resolve_attempts_reset),
+    (15, "fanatical_bundle_games.resolve_attempts 重置（0.4.1 判据修正：drm 权威"
+         " + 检索兜底，0.4.0 误直标的 58 条重走检索；合辑 SKU 由新规则重新直标）",
+     _migrate_fanatical_attempts_reset),
 ]
 
 

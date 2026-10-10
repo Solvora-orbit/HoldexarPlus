@@ -6,7 +6,7 @@
 
 **本地 Steam 多区价格监控终端** —— Holdexar 独立分支 · 持续演进版
 
-[![Version](https://img.shields.io/badge/version-v0.4.0-orange)](../../releases)
+[![Version](https://img.shields.io/badge/version-v0.4.1-orange)](../../releases)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13%2B-blue?logo=python&logoColor=white)](https://www.python.org)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Vue 3](https://img.shields.io/badge/Frontend-Vue%203-42b883?logo=vuedotjs&logoColor=white)](https://vuejs.org)
@@ -51,6 +51,7 @@
 - **v0.3.1**（2026-10-07）：捆绑包档位数据自愈补抓（存量包档位缺失导致档位条不出现）· 月包「抓取窗口」与「立即抓取」按钮重叠修复
 - **v0.3.0**（2026-10-07）：**装好就能用**——默认策略改「直连优先」（本机有系统代理自动识别并采用；导入订阅自动切代理优先，手动选过的策略不覆盖）· 直连形态默认不随价格轮刷全量目录/特惠榜（省流量）· 连不上 Steam 时弹加速器配置建议 · 捆绑包档位改 HB 官网式档位选择器（点档看该档实得全部游戏）· 收录链轮内连续分批 + 新包优先 + 「收录中 N」一键立即收录 · 愿望单同步补齐 SSL 证书降级（代理环境不再崩）· 爬虫写侧价格保全（本次失败不推翻曾经拿到，修 dev 库现价清零事故）· AI 月度用量默认不设上限 · 领航员多余卡片折叠 · 日志页模块中文名 · mihomo 内核 v1.19.32
 - **v0.4.0**（2026-10-11）：**捆绑包三站统一**——Fanatical（档位包 + 选择包）与 GreenManGaming（PWY 累进档）捆绑包接入捆绑包中心，与 HB 同构交互（档位条 / 卡片 / NEW / 三态关联状态），F 站价格 7 币种原生展示可切换（零折算）· 统一模糊检索引擎（storesearch + Steam 店铺全文搜索双检索源 + NFKD 音标归一，13 条 HB VR/格斗包存量欠账全部 exact 恢复）· HB 捆绑包销量「已购 N」显示 · 下架 30 天内带欠账的包也吃检索升级红利 · 爬取侧 HTML 实体/NFKC 字符标记防关联遗漏
+- **v0.4.1**（2026-10-11）：Fanatical 关联判据修正——steamId 缺失不再误标「非 Steam」（以 drm 字段为权威，58 条误标重走检索恢复），合辑 SKU（Double/Triple Pack、A + B、Pack/Bundle 收尾）如实直标 · 版本词表扩充 + 查询词「剥版本词」档（Premium/Legendary Edition 变体对准本体）· 完成 Mimosa 深度安全审计（25 项复核全为静态保守项，依赖 0 命中）
 
 **规划中**
 

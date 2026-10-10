@@ -2,6 +2,20 @@
 
 所有对外发布的变更记录。版本号方案：0.2.0 起转正式 semver（0.1.1-plus.N 开发线已随 plus.3 收尾）。
 
+## v0.4.1 (2026-10-11)
+
+捆绑包关联的两处误判修复（Fanatical 非 Steam 误标 + GMG/F 站版本词变体）。
+
+### 修复
+
+- **Fanatical 大批真实游戏被误标「非 Steam」**：0.4.0 把站点数据里 steamId 为空的条目一律当作非 Steam 直标（实测 58 条，其中 Dreamscaper、Teslagrad 2、Saint Kotar、DG2 等全部是 SteamDB 可查的真实游戏）。根因是判据错了——Algolia 索引常缺 steamId 字段，**是否 Steam 发行应以 `drm` 字段为准**：现在缺 id 但 drm 含 steam 的条目走统一检索引擎兜底（与 HB/GMG 同账本），drm 不含 steam 才直标。历史误标行随升级自动重置重试。
+- **「双拼/三拼合辑」不再空烧检索**：站点自造的合辑 SKU（Double/Triple Pack、"A + B" 组合、以 Pack/Bundle/Collection 收尾）Steam 上本无单一条目，直接如实标注，不再逐条试三轮。
+- **版本词变体关联不上**：`Premium Edition` / `Legendary Edition` / `Golden Train Edition` 这类后缀不在版本词表里，整名查询在 Steam 搜索里被同类挤出结果（Batman: Arkham Knight Premium Edition 实测 storesearch 直接返回空）。版本词表扩充 + 查询词链新增「剥版本词整名」档——`Batman: Arkham Knight Premium Edition` 现在直接对准 Arkham Knight 本体，`Injustice 2 Legendary Edition` 对准其真实 App（627270）。
+
+### 安全审计
+
+- 本轮完成一次完整 Mimosa 深度扫描（25 项发现已封印复核）：运行时服务两处 SQL 高危为静态保守误报（ORM 表达式与模块常量列名内插），其余为构建脚本/桌面壳自加载的同类保守项；依赖扫描 244 包 0 命中。
+
 ## v0.4.0 (2026-10-11)
 
 捆绑包中心三站统一：模糊检索引擎大修 + Fanatical / GMG 双站接入 + HB 销量。
