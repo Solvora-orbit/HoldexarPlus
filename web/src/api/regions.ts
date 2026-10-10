@@ -34,5 +34,31 @@ export function formatCnyFen(fen: number | null | undefined): string {
   return `¥${(fen / 100).toFixed(2)}`
 }
 
+/** 站点原生多币种展示（0.4.0 捆绑包中心）：分 → 符号+金额，零折算。
+ *  站点价统一 ×100 存储（JPY 亦然），除回 100 即展示值 */
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  CNY: '¥', USD: '$', EUR: '€', GBP: '£', JPY: '¥', RUB: '₽',
+  CAD: 'CA$', AUD: 'A$',
+}
+
+export function formatMoney(minor: number | null | undefined, currency: string): string {
+  if (minor === null || minor === undefined) return '—'
+  const sym = CURRENCY_SYMBOLS[currency] ?? `${currency} `
+  const value = minor / 100
+  // 零小数币种（JPY 类）站点已按 ×100 形态给值，除回即整数元；
+  // RUB 有戈比（小数），仅整值时省两位
+  const zeroDec = currency === 'JPY' || (currency === 'RUB' && Number.isInteger(value))
+  return `${sym}${value.toFixed(zeroDec ? 0 : 2)}`
+}
+
+/** 货币切换器默认币种：CNY 优先 → USD → EUR → 首个可得 */
+export function pickDefaultCurrency(map: Record<string, number> | null | undefined): string {
+  if (!map) return 'CNY'
+  for (const ccy of ['CNY', 'USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'RUB']) {
+    if (map[ccy] != null) return ccy
+  }
+  return Object.keys(map)[0] ?? 'CNY'
+}
+
 export type SortKey = 'default' | 'smart' | 'rate' | 'diff' | 'discount' | 'top100' | 'new2026'
 export type FilterMode = 'global' | 'cheaper' | 'highdiff'

@@ -5,8 +5,8 @@
  *
  * 范围：HB 月包（当月包 + 进包记录，包内游戏对应 Steam，点击进详情看价格）
  * + HB 捆绑包（HumbleBundlesPanel）+ Steam 捆绑包展示区与链接导入
- * （SteamBundlesPanel + 页头导入对话框）；其余站源（Fanatical / 绿巨人）
- * 为注册表预留位，接入时在 SOURCES 加一项并补对应面板即可，页面骨架不变。
+ * （SteamBundlesPanel + 页头导入对话框）+ Fanatical / GMG（0.4.0，
+ * StoreBundlesPanel 共用面板按 props 区分，档位语义 kind 随包）。
  *
  * 月包数据链：后端逐月抓 membership 页打标（含当月，KV 按月记账幂等），
  * 本页本地读 + 抓取窗口选择（默认 6 期，上限 24 期 = 最多 2 年）+
@@ -15,12 +15,20 @@
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { bundlesApi, metadataApi, type GameListItem, type HbHistoryMonth } from '@/api/client'
+import {
+  bundlesApi,
+  fanaticalApi,
+  gmgApi,
+  metadataApi,
+  type GameListItem,
+  type HbHistoryMonth,
+} from '@/api/client'
 import { useRegionsStore } from '@/stores/regions'
 import { useI18n, type MessageKey } from '@/locales'
 import HlGameCard from '@/components/business/HlGameCard.vue'
 import HumbleBundlesPanel from '@/components/business/HumbleBundlesPanel.vue'
 import SteamBundlesPanel from '@/components/business/SteamBundlesPanel.vue'
+import StoreBundlesPanel from '@/components/business/StoreBundlesPanel.vue'
 import HlBacktop from '@/components/ui/HlBacktop.vue'
 import HlButton from '@/components/ui/HlButton.vue'
 import HlDialog from '@/components/ui/HlDialog.vue'
@@ -38,8 +46,8 @@ const SOURCES: { key: SourceKey; labelKey: MessageKey; soon?: boolean }[] = [
   { key: 'hb-monthly', labelKey: 'bundleshub.source.hbMonthly' },
   { key: 'hb-bundles', labelKey: 'bundleshub.source.hbBundles' },
   { key: 'steam-bundles', labelKey: 'bundleshub.source.steamBundles' },
-  { key: 'fanatical', labelKey: 'bundleshub.source.fanatical', soon: true },
-  { key: 'greenman', labelKey: 'bundleshub.source.greenman', soon: true },
+  { key: 'fanatical', labelKey: 'bundleshub.source.fanatical' },
+  { key: 'greenman', labelKey: 'bundleshub.source.greenman' },
 ]
 
 function isSourceKey(v: unknown): v is SourceKey {
@@ -328,6 +336,22 @@ const monthCountLabel = computed(() =>
 
     <!-- Steam 捆绑包展示区（已导入的 bundle/sub；导入入口保留在页头） -->
     <SteamBundlesPanel v-else-if="activeSource === 'steam-bundles'" />
+
+    <!-- Fanatical / GMG（0.4.0）：与 HB 同构交互的共用站源面板，仅 props 不同 -->
+    <StoreBundlesPanel
+      v-else-if="activeSource === 'fanatical'"
+      source-key="fanatical"
+      :api="fanaticalApi"
+      desc-key="bundles.fanatical.desc"
+      default-kind="tiered"
+    />
+    <StoreBundlesPanel
+      v-else-if="activeSource === 'greenman'"
+      source-key="greenman"
+      :api="gmgApi"
+      desc-key="bundles.greenman.desc"
+      default-kind="cumulative"
+    />
 
     <!-- 未接入站源：诚实占位 -->
     <HlEmpty v-else icon="" style="--pane-pad: 48px 24px">

@@ -26,7 +26,6 @@
 from __future__ import annotations
 
 import asyncio
-import difflib
 import html
 import json
 import logging
@@ -42,6 +41,13 @@ from sqlalchemy import case, func, or_, select, update
 
 from app.core.database import WritePriority, get_session_factory
 from app.core.database import write_gate
+from app.domains.metadata.resolver import (  # noqa: F401 —— 再导出：测试/外部挂旧符号
+    _NON_CORE_RE,
+    _clean_name,
+    _pick_appid,
+    normalize_title,
+    resolve_appid as _resolve_appid_impl,
+)
 from app.crawler.epic_free import (
     fetch_free_games,
     fetch_free_offers,
@@ -77,35 +83,8 @@ def resolve_source_path(source_dir: str | None, filename: str) -> Path:
 
 
 # ─── XGP 名称匹配（名称清洗 + 三级查找）───────────────
-
-_TRADEMARK_RE = re.compile(r"\s*\-\s*pc edition|\s*\(pc\)|\s*\(windows\)|\s*windows edition|\s*xbox one|\s*xbox series x\|s")
-_EDITION_RE = re.compile(
-    r"\s*standard edition|\s*game of the year edition|\s*anniversary edition|\s*complete edition"
-    r"|\s*deluxe edition|\s*definitive edition|\s*remastered|\s*director's cut|\s*ultimate edition",
-    re.IGNORECASE,
-)
-
-# 本体附属条目名称词（0.3.2）：模糊关联两级的前置拦截——storesearch 对
-# "Disco Elysium" 同时回 The Final Cut 本体与 Soundtrack/Artbooklet 附属，
-# 模糊匹配若不加拦会按返回序把原声当本体
-_NON_CORE_RE = re.compile(
-    r"soundtrack|\bost\b|original score|artbooklet|art book|digital comic"
-    r"|season pass|preload|\bdemo\b|\bbeta\b|\bdlc\b",
-    re.IGNORECASE,
-)
-
-
-def _clean_name(n: str) -> str:
-    if not n:
-        return ""
-    n = n.lower()
-    n = n.replace("™", "").replace("®", "").replace("©", "")
-    n = n.replace("’", "'").replace("–", "-").replace("—", "-")
-    n = _TRADEMARK_RE.sub("", n)
-    n = _EDITION_RE.sub("", n)
-    n = n.replace("ea sports fc", "fc").replace("ea sports ", "")
-    n = re.sub(r"[^\w\s]", "", n)
-    return re.sub(r"\s+", " ", n).strip()
+# 名称归一/五级匹配（_clean_name、_pick_appid、_NON_CORE_RE）0.4.0 起收敛到
+# metadata/resolver.py 统一引擎，本模块经顶部 import 再导出供测试与内部沿用。
 
 
 def _build_links_map(links: list[dict]) -> dict[str, dict[str, str]]:
@@ -332,7 +311,6 @@ async def import_hb(source_dir: str | None = None) -> dict:
 # 诱导依赖一份注定不全的存档。
 
 _MEMBERSHIP_URL = "https://www.humblebundle.com/membership"
-_STORESEARCH_URL = "https://store.steampowered.com/api/storesearch"
 _HB_STATE_KEY = "hb_choice_last_month"
 _CHOICE_TIMEOUT = 25
 
@@ -393,58 +371,6 @@ def _parse_choice_page(html_text: str) -> dict:
     }
 
 
-def _pick_appid(title: str, hits: list[dict]) -> int | None:
-    """storesearch 命中列表 → appid：exact → 清洗名 → playtest 归一 →
-    前缀副标题 → 相似度，五级匹配（前三级与 XGP 链同口径）。
-
-    两轮扫描而非逐条短路：副标题变体（如 Deluxe Edition 被清洗层剥掉）
-    不能抢在 exact 命中之前。playtest 层：Humble 偶发给测试键（页内标题
-    带 Playtest），商店侧无该条目——剥掉 playtest 词后与商店本体同形即认。
-    前缀层（0.3.2）：HB 惯用简称而商店是全称——`Disco Elysium` 的 Steam
-    本体是 `Disco Elysium - The Final Cut`；清洗名互为前缀（后接空格，
-    防 disco 撞 discover）即认。模糊两级排除原声/画集/季票等外围条目
-    （storesearch 的 type 一律是 app 不可用作判据，按名称词拦）。
-    相似层：SequenceMatcher ≥ 0.8 收口轻微拼写差异，取分最高者；
-    低于阈值宁缺勿猜——错关联比留欠账毒得多。
-    """
-    want = title.lower().strip()
-    want_clean = _clean_name(title)
-    want_pt = " ".join(t for t in want_clean.split() if t != "playtest")
-    exact = clean = playtest = prefix = similar = None
-    similar_score = 0.0
-    for hit in hits:
-        name = str(hit.get("name") or "")
-        hit_id = str(hit.get("id") or "")
-        if not name or not hit_id.isdigit():
-            continue
-        name_clean = _clean_name(name)
-        if exact is None and name.lower().strip() == want:
-            exact = int(hit_id)
-        if clean is None and want_clean and name_clean == want_clean:
-            clean = int(hit_id)
-        if playtest is None and want_pt and want_pt != want_clean \
-                and name_clean == want_pt:
-            playtest = int(hit_id)
-        # 前缀/相似两级排除外围条目：storesearch 的 type 一律 app 不可用
-        # （0.3.2 实测），按名称词拦原声/画集/季票等本体附属
-        if _NON_CORE_RE.search(name):
-            continue
-        if want_clean and prefix is None and (
-            name_clean.startswith(want_clean + " ")
-            or want_clean.startswith(name_clean + " ")
-        ):
-            prefix = int(hit_id)
-        elif prefix is None:
-            score = difflib.SequenceMatcher(None, want_clean, name_clean).ratio()
-            if score >= 0.8 and score > similar_score:
-                similar_score = score
-                similar = int(hit_id)
-    for pick in (exact, clean, playtest, prefix, similar):
-        if pick is not None:
-            return pick
-    return None
-
-
 def _hb_headers() -> dict:
     return {
         "Accept": "application/json, text/html;q=0.9, */*;q=0.8",
@@ -482,40 +408,12 @@ async def _fetch_membership_page(
 async def _resolve_appid(
     session: aiohttp.ClientSession, title: str, proxy: str | None
 ) -> int | None:
-    """条目标题 → Steam appid（storesearch，HTTP 层失败返回 None 由调用方记账）。
+    """条目标题 → Steam appid（0.4.0 起为统一检索引擎的委托薄壳）。
 
-    查询词先剥符号（Keylocker | …、Pocket Mirror ~ … 这类标题里的
-    竖线/波浪号会让 storesearch 返回空），再降为前 2 词/首词——命中判定
-    在返回侧按名匹配，查询词短不影响对准。降词链不因「非空但不匹配」
-    中断（0.3.2）：Who's Lila? 全称查询会回一堆杂讯顶掉本体位次，
-    截断词查询才把它顶到命中位——非空 hits 选不中时继续下一档词。"""
-    base = re.sub(r"[^\w\s]", " ", title)
-    tokens = base.split()
-    candidates = [" ".join(tokens)]
-    if len(tokens) > 2:
-        candidates.append(" ".join(tokens[:2]))
-    if len(tokens) > 1:
-        candidates.append(tokens[0])
-    try:
-        for term in candidates:
-            async with session.get(
-                _STORESEARCH_URL,
-                params={"term": term, "cc": "us", "l": "en"},
-                headers=_hb_headers(),
-                proxy=proxy,
-                timeout=aiohttp.ClientTimeout(total=15),
-            ) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json(content_type=None)
-            hits = (data or {}).get("items") or []
-            if hits:
-                pick = _pick_appid(title, hits)
-                if pick is not None:
-                    return pick
-        return None
-    except Exception:  # noqa: BLE001
-        return None
+    实现在 resolver.resolve_appid：storesearch + 店铺全文搜索两级检索源、
+    主标题段降词链、归一化五级匹配。保留本模块符号作为唯一接缝——humble/
+    fanatical/gmg 各域与测试 monkeypatch 都挂这个名字。"""
+    return await _resolve_appid_impl(session, title, proxy)
 
 
 async def _mark_game_hb(appid: int, title: str, label: str) -> None:

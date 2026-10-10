@@ -1292,6 +1292,99 @@ async def _job_humble_ingest() -> None:
         logger.exception("[调度] HB 捆绑包收录扫描异常（次日自动重试）")
 
 
+async def _job_fanatical_bundles() -> None:
+    """Fanatical 捆绑包刷新（每日 07:15，HB 链之后错峰）：Algolia 列表 +
+    档位价格 + 包内条目（appid 站点直取，无检索链，全量一轮 ≈12 请求）。"""
+    if not await content_fetch_enabled("fetch.fanatical_bundles"):
+        return  # 「Fanatical 捆绑包」开关关闭：定时停转，已有数据保留展示
+    from app.domains.fanatical import service as fanatical_service
+
+    try:
+        result = await fanatical_service.refresh_fanatical_bundles()
+        if result.get("ok"):
+            logger.info("[调度] Fanatical 捆绑包刷新：列表 %d 包（条目 %d）",
+                        result.get("listed", 0), result.get("items", 0))
+        else:
+            logger.warning("[调度] Fanatical 捆绑包刷新未完成：%s", result.get("error"))
+    except Exception:  # noqa: BLE001
+        logger.exception("[调度] Fanatical 捆绑包刷新异常（次日自动重试）")
+
+
+async def _job_fanatical_catchup() -> None:
+    """启动补跑（0.4.0）：Fanatical 捆绑包。窗口 300s 后补跑一轮
+    （全量链天然幂等；开关关闭时静默让位）。"""
+    try:
+        await asyncio.sleep(300)
+        if not await content_fetch_enabled("fetch.fanatical_bundles"):
+            return
+        await _job_fanatical_bundles()
+    except Exception:  # noqa: BLE001
+        logger.exception("[调度] Fanatical 捆绑包启动补跑异常（不阻塞启动）")
+
+
+async def _job_fanatical_ingest() -> None:
+    """Fanatical 捆绑包收录扫描（每日 07:25）：在售包内已解析但目录缺行的
+    游戏批量登记首爬（kind=fanatical_backfill），与 humble 收录链同型。"""
+    if not await content_fetch_enabled("fetch.fanatical_bundles"):
+        return
+    from app.domains.fanatical import service as fanatical_service
+
+    try:
+        result = await fanatical_service.scan_missing_ingest()
+        if result.get("queued"):
+            logger.info("[调度] Fanatical 捆绑包收录：登记首爬 %d 款（候选 %d）",
+                        result["queued"], result.get("candidates", 0))
+    except Exception:  # noqa: BLE001
+        logger.exception("[调度] Fanatical 捆绑包收录扫描异常（次日自动重试）")
+
+
+async def _job_gmg_bundles() -> None:
+    """GMG 捆绑包刷新（每日 07:35）：主站列表 + 子站详情（带重试抗软封锁）
+    + 包内游戏统一检索关联（attempts/not_found 同 HB）。"""
+    if not await content_fetch_enabled("fetch.gmg_bundles"):
+        return
+    from app.domains.gmg import service as gmg_service
+
+    try:
+        result = await gmg_service.refresh_gmg_bundles()
+        if result.get("ok"):
+            logger.info(
+                "[调度] GMG 捆绑包刷新：列表 %d 包 / 详情 %d 包（未解析 %d）",
+                result.get("listed", 0), len(result.get("details") or []),
+                result.get("unresolvedTotal", 0),
+            )
+        else:
+            logger.warning("[调度] GMG 捆绑包刷新未完成：%s", result.get("error"))
+    except Exception:  # noqa: BLE001
+        logger.exception("[调度] GMG 捆绑包刷新异常（次日自动重试）")
+
+
+async def _job_gmg_catchup() -> None:
+    """启动补跑（0.4.0）：GMG 捆绑包。窗口 420s 后补跑一轮（幂等闸内静默）。"""
+    try:
+        await asyncio.sleep(420)
+        if not await content_fetch_enabled("fetch.gmg_bundles"):
+            return
+        await _job_gmg_bundles()
+    except Exception:  # noqa: BLE001
+        logger.exception("[调度] GMG 捆绑包启动补跑异常（不阻塞启动）")
+
+
+async def _job_gmg_ingest() -> None:
+    """GMG 捆绑包收录扫描（每日 07:45，kind=gmg_backfill）。"""
+    if not await content_fetch_enabled("fetch.gmg_bundles"):
+        return
+    from app.domains.gmg import service as gmg_service
+
+    try:
+        result = await gmg_service.scan_missing_ingest()
+        if result.get("queued"):
+            logger.info("[调度] GMG 捆绑包收录：登记首爬 %d 款（候选 %d）",
+                        result["queued"], result.get("candidates", 0))
+    except Exception:  # noqa: BLE001
+        logger.exception("[调度] GMG 捆绑包收录扫描异常（次日自动重试）")
+
+
 async def _job_coming_soon_retry() -> None:
     """COMING_SOON 重探层（每日 10:00，限量 20 个）：
 
@@ -1522,6 +1615,12 @@ def start_scheduler() -> None:
     scheduler.add_job(_job_humble_bundles, "cron", hour=6, minute=55, id="humble_bundles")
     # 收录扫描（0.2.2）：未入目录的包内游戏补首爬，独立一拍不依赖刷新成败
     scheduler.add_job(_job_humble_ingest, "cron", hour=7, minute=5, id="humble_ingest")
+    # Fanatical 捆绑包（0.4.0）：07:15 刷新 + 07:25 收录（HB 链后错峰）
+    scheduler.add_job(_job_fanatical_bundles, "cron", hour=7, minute=15, id="fanatical_bundles")
+    scheduler.add_job(_job_fanatical_ingest, "cron", hour=7, minute=25, id="fanatical_ingest")
+    # GMG 捆绑包（0.4.0）：07:35 刷新 + 07:45 收录（F 站链后错峰）
+    scheduler.add_job(_job_gmg_bundles, "cron", hour=7, minute=35, id="gmg_bundles")
+    scheduler.add_job(_job_gmg_ingest, "cron", hour=7, minute=45, id="gmg_ingest")
     scheduler.add_job(_job_epic_free, "cron", hour=7, minute=10, id="epic_free")
     # Steam 活动日历：官方文档页低频变更，每日一拍足够；05:00 避开已占分钟
     scheduler.add_job(
@@ -1568,6 +1667,16 @@ def start_scheduler() -> None:
         asyncio.create_task(_job_humble_catchup())
     except RuntimeError:
         logger.warning("[调度] 无运行中事件循环，跳过 HB 捆绑包启动补跑")
+    # Fanatical 捆绑包启动补跑（300s，幂等闸内静默跳过）
+    try:
+        asyncio.create_task(_job_fanatical_catchup())
+    except RuntimeError:
+        logger.warning("[调度] 无运行中事件循环，跳过 Fanatical 捆绑包启动补跑")
+    # GMG 捆绑包启动补跑（420s，幂等闸内静默跳过）
+    try:
+        asyncio.create_task(_job_gmg_catchup())
+    except RuntimeError:
+        logger.warning("[调度] 无运行中事件循环，跳过 GMG 捆绑包启动补跑")
     logger.info("调度器已启动（账户同步 15min / 池价格爬取锚点网格：Steam 折扣刷新锚 北京 01:00[夏令时]/02:00[冬令时] + 6h 步进[目录层与特惠榜差值段随开关] / 外部时间判定 DST / 捆绑包关注集刷新随价格链 / 失败记录修复 5min 空闲档 / 汇率每日 03:00 + 历史修复每日 04:00[缺口·空闲·Key·配额四重门禁] / WAL 收缩每日 04:30 / Barter.vg bundle 计数每日 05:40 / 代理体检 6h / Clash 订阅重拉 30min 拍[6h 门槛·爬虫空闲档] / 钱包每分钟轮转 / 账单 30min / 热销榜 1h / 热门新品 24h / 即将推出 24h / CS 重探每日 10:00 / 自动备份 24h）")
 
 

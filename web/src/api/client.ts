@@ -1504,6 +1504,8 @@ export interface HumbleBundleItem {
   onSale: boolean
   /** 包内条目总数（0.2.1 全量语义：含解析中与收录中） */
   gameCount: number
+  /** 当前销量（0.4.0：列表页 bundles_sold / 详情页 num_purchases）；null = 未抓到过 */
+  soldCount?: number | null
   /** 本轮扫出的新包未读（点开即已读） */
   isNew: boolean
 }
@@ -1569,6 +1571,87 @@ export const humbleApi = {
   ingestNow: () =>
     request<{ ok: boolean; started: boolean; running: boolean }>('POST', '/humble/bundles/ingest-now'),
 }
+
+// ─── fanatical / gmg（捆绑包中心新站源，0.4.0，与 humble 三态/档位同构）──
+
+/** 站点原生多币种价格 map（ISO 币种 → 分）；展示零折算，前端切换币种。
+ *  Fanatical 无 CNY（7 币种），GMG 以 CNY 起步（代理出口可能 USD） */
+export type PriceMap = Record<string, number>
+
+/** 档位内游戏条目（unlockPriceMap：tiered=该档价 / pick=最低档价 /
+ *  HB·GMG 累进=首现档价） */
+export interface StoreTierGame {
+  title: string
+  appid: number | null
+  isNew?: boolean
+  unlockPriceMap?: PriceMap | null
+}
+
+/** 价格档位：tiered（F 站档位包）档间独立集合（games=该档全部）；
+ *  pick（F 站选择包）数量档（quantity=选 N 款，games=全池）；
+ *  无 kind 的 HB/GMG 为累进档（games=买这档实拿全部，isNew=本档新增） */
+export interface StoreTier {
+  id: string
+  header?: string
+  quantity?: number | null
+  priceMap: PriceMap | null
+  isInitial?: boolean
+  newGames?: StoreTierGame[]
+  newCount?: number
+  count: number
+  games?: StoreTierGame[]
+}
+
+export interface StoreBundleItem {
+  slug: string
+  /** tiered=档位包 / pick=选择包；GMG 恒 tiered 不带此字段 */
+  kind?: 'tiered' | 'pick'
+  name: string
+  image: string
+  url: string
+  priceMap: PriceMap | null
+  startAt: string | null
+  endAt: string | null
+  onSale: boolean
+  gameCount: number
+  isNew: boolean
+}
+
+export interface StoreBundlesPayload {
+  running: boolean
+  ingestRunning?: boolean
+  ingestPending?: number
+  bundles: StoreBundleItem[]
+}
+
+export interface StoreBundleDetailPayload extends Omit<StoreBundleItem, 'isNew'> {
+  items: GameListItem[]
+  total: number
+  /** 三态与 HB 同构（resolving/ingesting/not_found） */
+  pending: HumblePendingGame[]
+  tiers: StoreTier[]
+}
+
+function storeBundleApi(prefix: string) {
+  return {
+    /** 在售列表（纯本地读，零外网） */
+    bundles: () => request<StoreBundlesPayload>('GET', `/${prefix}/bundles`),
+    /** 单包详情：包信息 + 包内游戏 + 档位（kind 区分累进/独立集/数量档） */
+    bundleDetail: (slug: string) =>
+      request<StoreBundleDetailPayload>('GET', `/${prefix}/bundles/${encodeURIComponent(slug)}`),
+    /** 点开包 = 已读（清 NEW 徽章，幂等） */
+    seen: (slug: string) =>
+      request<{ ok: boolean }>('POST', `/${prefix}/bundles/${encodeURIComponent(slug)}/seen`),
+    /** 启动一轮刷新（后台任务立即返回；running 轮询 bundles 端点） */
+    refresh: () => request<{ ok: boolean; started: boolean; running: boolean }>('POST', `/${prefix}/refresh`),
+    /** 立即跑一轮目录收录（ingestRunning/ingestPending 轮询收尾） */
+    ingestNow: () =>
+      request<{ ok: boolean; started: boolean; running: boolean }>('POST', `/${prefix}/bundles/ingest-now`),
+  }
+}
+
+export const fanaticalApi = storeBundleApi('fanatical')
+export const gmgApi = storeBundleApi('gmg')
 
 // ─── watch pool（监控池：账户绑定 + 池条目。后端仍走 wishlist 域端点）─────
 

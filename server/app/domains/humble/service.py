@@ -21,9 +21,11 @@ on_sale=false 保留历史（进包记录语义同月包）。
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 import re
+import unicodedata
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
@@ -51,6 +53,8 @@ _MACHINE_RE = re.compile(r'"machine_name":\s*"([^"]+)"')
 _TIER_PRICING_RE = re.compile(r'"tier_pricing_data"\s*:\s*(?=\{)')
 _TIER_DISPLAY_RE = re.compile(r'"tier_display_data"\s*:\s*(?=\{)')
 _PRICE_RE = re.compile(r'"preset_prices"\s*:\s*(\[)')
+# 销量统计（0.4.0）：bundleData.statistics_data.{num_purchases|decimal, …}
+_STATS_RE = re.compile(r'"statistics_data"\s*:\s*(?=\{)')
 _ISO_RE = re.compile(r'^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})')
 # 慈善/通用角标条目不是游戏：机名或标题命中即剔
 _NON_GAME_HINTS = ("charity", "child's play", "pay what you want", "coupon")
@@ -133,6 +137,23 @@ def _unesc(s: str) -> str:
         return s
 
 
+def _display_text(s: str) -> str:
+    """入库显示名清洗（0.4.0）：_unesc 还原 JSON 转义之外，再走一次 HTML
+    实体还原 + NFKC 归一——`&amp;`/`&#39;`/全角标点不再以脏形态入库
+    （用户点名项：爬取时把特殊字符处理干净防关联遗漏）。匹配层
+    resolver.normalize_title 同时免疫，双保险。"""
+    return unicodedata.normalize("NFKC", html.unescape(s or "")).strip()
+
+
+def _sold_to_int(v: object) -> int | None:
+    """bundles_sold|decimal（浮点计数）→ int；缺失/畸形返回 None 不硬造 0。"""
+    try:
+        n = float(v)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return int(n) if n >= 0 else None
+
+
 def _decode_at(text: str, brace_pos: int, opener: str, closer: str):
     """从锚点位起 raw_decode 一个 JSON 容器（页面文本里条目含嵌套花括号，
     手切不可靠；月包解析链同款做法）。"""
@@ -165,10 +186,11 @@ def parse_games_list(html_text: str) -> list[dict]:
             out.append({
                 "slug": slug,
                 "machine_name": str(p.get("machine_name") or ""),
-                "name": str(p.get("tile_name") or p.get("machine_name") or slug),
+                "name": _display_text(str(p.get("tile_name") or p.get("machine_name") or slug)),
                 "image": str(p.get("tile_image") or p.get("high_res_tile_image") or ""),
                 "start_at": _parse_iso(str(p.get("start_date|datetime") or "")),
                 "end_at": _parse_iso(str(p.get("end_date|datetime") or "")),
+                "sold_count": _sold_to_int(p.get("bundles_sold|decimal")),
             })
     return out
 
@@ -181,7 +203,7 @@ def _parse_game_items(html_text: str, bundle_name: str) -> dict[str, str]:
     image_text，归属天然无窗重叠歧义（旧版「anchor 前 1500 字符回看」在
     条目密集处会串到上一条目）。慈善/soundtrack 等非游戏条目段没有
     platforms_and_oses，或平台里没有 steam，直接落选。"""
-    lowered = (bundle_name or "").lower()
+    lowered = _display_text(bundle_name or "").lower()
     anchors = [(m.start(), m.group(1)) for m in _MACHINE_RE.finditer(html_text)]
     items: dict[str, str] = {}
     for i, (pos, machine) in enumerate(anchors):
@@ -198,7 +220,7 @@ def _parse_game_items(html_text: str, bundle_name: str) -> dict[str, str]:
         if "steam" not in game:
             continue
         nm = _NAME_RE.search(seg)
-        title = _unesc((nm.group(1) if nm else "").strip())
+        title = _display_text(_unesc((nm.group(1) if nm else "").strip()))
         low = title.lower()
         if not title or low == lowered:
             continue
@@ -253,11 +275,12 @@ def _parse_tiers(html_text: str, machine_titles: dict[str, str]) -> list[dict]:
 
 
 def parse_bundle_detail(html_text: str, bundle_name: str) -> dict:
-    """详情页 → {price_cny_fen, titles, tiers}。
+    """详情页 → {price_cny_fen, titles, tiers, sold_count}。
 
     价格：preset_prices 最低档（PWYW 包起步价 = 用户口中的「捆绑包价格」）。
     条目：全部 Steam 游戏标题（0.2.2 起 = 各档新增的并集，由 machine_name
-    切段判定的游戏条目）。档位：见 _parse_tiers。"""
+    切段判定的游戏条目）。档位：见 _parse_tiers。销量：statistics_data.
+    num_purchases（0.4.0，与列表页 bundles_sold 交叉验证同值）。"""
     price_fen: int | None = None
     pm = _PRICE_RE.search(html_text)
     if pm:
@@ -268,10 +291,18 @@ def parse_bundle_detail(html_text: str, bundle_name: str) -> dict:
             if amounts:
                 price_fen = min(amounts)
 
+    sold_count: int | None = None
+    sm = _STATS_RE.search(html_text)
+    if sm:
+        stats = _decode_at(html_text, sm.end(), "{", "}")
+        if isinstance(stats, dict):
+            sold_count = _sold_to_int(stats.get("num_purchases|decimal"))
+
     machine_titles = _parse_game_items(html_text, bundle_name)
     titles = list(dict.fromkeys(machine_titles.values()))
     tiers = _parse_tiers(html_text, machine_titles)
-    return {"price_cny_fen": price_fen, "titles": titles, "tiers": tiers}
+    return {"price_cny_fen": price_fen, "titles": titles, "tiers": tiers,
+            "sold_count": sold_count}
 
 
 async def _fetch_page(session: aiohttp.ClientSession, proxy: str | None, url: str) -> str | None:
@@ -304,6 +335,7 @@ async def _upsert_bundles(rows: list[dict]) -> int:
                     slug=r["slug"], machine_name=r["machine_name"], name=r["name"],
                     image=r["image"], url=f"{_HUMBLE_BASE}/games/{r['slug']}",
                     start_at=r["start_at"], end_at=r["end_at"],
+                    sold_count=r.get("sold_count"),
                     on_sale=True, first_seen_at=now, last_seen_at=now,
                 ))
             else:
@@ -311,6 +343,8 @@ async def _upsert_bundles(rows: list[dict]) -> int:
                 existing.image = r["image"] or existing.image
                 if r["end_at"]:
                     existing.end_at = r["end_at"]
+                if r.get("sold_count") is not None:
+                    existing.sold_count = r["sold_count"]
                 existing.last_seen_at = now
                 existing.on_sale = True
         # 本轮未露面的包 = 已下架（保留历史行；列表只出在售包，一次抓全 ≤20）
@@ -390,6 +424,11 @@ async def _sync_bundle_detail(
             await s.execute(
                 update(HumbleBundle).where(HumbleBundle.slug == bundle.slug)
                 .values(price_cny_fen=detail["price_cny_fen"])
+            )
+        if detail.get("sold_count") is not None:
+            await s.execute(
+                update(HumbleBundle).where(HumbleBundle.slug == bundle.slug)
+                .values(sold_count=detail["sold_count"])
             )
         if detail.get("tiers"):
             # 档位有结果才覆盖：页面结构变动解析为空时保留旧档不清空
@@ -526,8 +565,29 @@ async def refresh_humble_bundles() -> dict:
                         )
                     )
                 ).scalars().all()
+                # 下架包欠账红利（0.4.0）：下架 30 天内的包若还有未放弃欠账
+                # 条目，也补一轮解析（页仍在则吃到检索升级红利；页已下线
+                # _fetch_page 安全失败）。每包 24h 至多一轮（updated_at 阈值），
+                # 单轮上限 6。
+                recent_offsale = (
+                    await s.execute(
+                        select(HumbleBundle).where(
+                            HumbleBundle.on_sale.is_(False),
+                            HumbleBundle.last_seen_at >= now - timedelta(days=30),
+                            or_(
+                                HumbleBundle.updated_at.is_(None),
+                                HumbleBundle.updated_at < cutoff,
+                            ),
+                            has_pending,
+                        )
+                        .order_by(HumbleBundle.last_seen_at.desc())
+                        .limit(6)
+                    )
+                ).scalars().all()
             done: list[dict] = []
             for bundle in stale[:24]:
+                done.append(await _sync_bundle_detail(session, proxy, bundle, mark_updated=True))
+            for bundle in recent_offsale:
                 done.append(await _sync_bundle_detail(session, proxy, bundle, mark_updated=True))
         unresolved_total = sum(len(d.get("unresolved") or []) for d in done)
         # 刷新收敛后跑一轮收录扫描（0.2.2）：本轮新解析出的未入目录 appid
@@ -698,6 +758,8 @@ async def list_bundles() -> dict:
             "endAt": r.end_at.isoformat() if r.end_at else None,
             "onSale": r.on_sale and (r.end_at is None or r.end_at >= now),
             "gameCount": r.game_count,
+            # 当前销量（0.4.0）：列表页 bundles_sold / 详情页 num_purchases
+            "soldCount": r.sold_count,
             # 本轮扫出的新包未读（NEW 徽章）；用户点开包 = 已读（mark_seen）
             "isNew": r.acked_at is None,
         }
@@ -817,6 +879,7 @@ async def bundle_detail(slug: str) -> dict | None:
         "startAt": bundle.start_at.isoformat() if bundle.start_at else None,
         "endAt": bundle.end_at.isoformat() if bundle.end_at else None,
         "gameCount": len(rows),
+        "soldCount": bundle.sold_count,
         "items": [], "total": 0, "pending": pending, "tiers": tiers_out,
     }
     if appids:

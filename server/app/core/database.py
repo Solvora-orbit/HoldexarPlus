@@ -239,6 +239,9 @@ _TABLE_EXTRA_COLUMNS: dict[str, dict[str, str]] = {    "games": {
         "acked_at": "DATETIME",
         # 价格档位 JSON（0.2.2）：NULL = 未解析过，API 侧回退无档位展示
         "tiers_json": "TEXT",
+        # 当前销量/购买次数（0.4.0）：列表页 bundles_sold、详情页
+        # statistics_data.num_purchases；NULL = 两处都还没抓到过
+        "sold_count": "INTEGER",
     },
     # 包内条目关联尝试计数（0.3.2 非 Steam 标注）：≥3 轮 storesearch 解析
     # 仍失败 → 抽屉标「未找到」（大概率非 Steam 发行），停止空转重试
@@ -356,7 +359,7 @@ def _ensure_schema(sync_conn) -> None:
 #   2. _MIGRATIONS 追加 (版本号, 描述, SQL 列表)；SQL 须幂等（中断续跑 +
 #      用户库版本乱序防御），复杂逻辑可登记 async fn(engine) 同位元素
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 # 零小数货币（Steam 以整数计价）：旧捆绑包链路的除数表按 1 处理，与「统一存分」
 # 的新约定差 100 倍——v2 归一的目标集合
@@ -899,6 +902,26 @@ async def _migrate_humble_acked_at(conn) -> None:
     ))
 
 
+async def _migrate_resolve_attempts_reset(conn) -> None:
+    """v14：appid 检索引擎升级（0.4.0 搜索页兜底源 + NFKD 归一）后重置关联尝试。
+
+    0.3.2 前旧链在 storesearch 弱检索下烧光 attempts 的行被 not_found 永久
+    搁置（dev 库实证 13 条：VR 包/格斗包标题 storesearch 只回热门杂讯，
+    新引擎对搜索页 13/13 exact 命中）——一次性清零让欠账吃新引擎红利；
+    真非 Steam 条目三轮后自然回到 not_found。幂等：只动未解析行。
+    带表存在守卫（同 v13 模式）。"""
+    from sqlalchemy import text
+
+    has_table = await conn.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='humble_bundle_games'")
+    )
+    if has_table.first() is None:
+        return
+    await conn.execute(text(
+        "UPDATE humble_bundle_games SET resolve_attempts = 0 WHERE appid IS NULL"
+    ))
+
+
 # (目标版本, 说明, 迁移体)：迁移体 = SQL 语句列表，或 async callable(engine)
 _MIGRATIONS: list[tuple[int, str, object]] = [
     (2, "bundle_region_prices 零小数货币单位归一（元→分 + cny_fen 去虚高）",
@@ -951,6 +974,9 @@ _MIGRATIONS: list[tuple[int, str, object]] = [
     (13, "humble_bundles.acked_at 存量回填已读（0.2.1 NEW 徽章上线：升级前抓的包"
          "不该当日涌新；列本身由列保障层 ALTER 补，本步只回填值）",
      _migrate_humble_acked_at),
+    (14, "humble_bundle_games.resolve_attempts 重置（0.4.0 检索引擎升级：storesearch"
+         " 弱检索期烧光尝试的欠账行吃新引擎红利，真非 Steam 条目自然回落 not_found）",
+     _migrate_resolve_attempts_reset),
 ]
 
 
@@ -1091,6 +1117,8 @@ async def init_db() -> None:
     from app.domains.crawl import events as _crawl_events  # noqa: F401
     from app.domains.crawl import models as _crawl_models  # noqa: F401
     from app.domains.games import models as _games_models  # noqa: F401
+    from app.domains.fanatical import models as _fanatical_models  # noqa: F401
+    from app.domains.gmg import models as _gmg_models  # noqa: F401
     from app.domains.humble import models as _humble_models  # noqa: F401
     from app.domains.monitoring import models as _monitoring_models  # noqa: F401
     from app.domains.notifications import models as _notification_models  # noqa: F401

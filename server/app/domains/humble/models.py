@@ -38,6 +38,10 @@ class HumbleBundle(Base):
     # 存量库经列保障 ALTER 带 DEFAULT CURRENT_TIMESTAMP = 视为已读（升级不涌 NEW）；
     # 新行写侧显式置 None（未读）。
     acked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
+    # 当前销量/购买次数（0.4.0）：列表页 bundles_sold、详情页
+    # statistics_data.num_purchases（两处交叉验证同值、实时计数）；
+    # NULL = 两处都还没抓到过（不硬造 0）
+    sold_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # 最近一次详情抓取
