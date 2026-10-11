@@ -710,6 +710,35 @@ async def ensure_bundle_stored(bundle_id: int) -> bool:
     return True
 
 
+async def heal_bundle_refs(refs: list[int]) -> int:
+    """三站联动悬空引用补抓（0.6.0 自愈环）：条目落了 bundle_id 引用但包
+    主档不在库（ensure 偶发失败：瞬时写锁/网络抖动/抓取空）→ 刷新尾重试。
+
+    bundle_known 语义使这些条目不会再进 sync，不补就永远缺主档（抽屉捆绑包
+    卡无价无图）。幂等：已在库的直接跳过。返回补成功数。"""
+    if not refs:
+        return 0
+    from app.domains.games.models import Bundle
+
+    async with get_session_factory()() as s:
+        have = {
+            int(r) for (r,) in await s.execute(
+                select(Bundle.bundle_id).where(Bundle.bundle_id.in_(list(set(refs))))
+            )
+        }
+    healed = 0
+    for bid in dict.fromkeys(int(b) for b in refs if int(b) > 0):
+        if bid in have:
+            continue
+        try:
+            if await ensure_bundle_stored(bid):
+                healed += 1
+        except Exception:  # noqa: BLE001
+            logger.exception("[bundles] 联动引用 %d 补抓失败（下轮再来）", bid)
+        await asyncio.sleep(0.2)
+    return healed
+
+
 async def _fetch_app_type(
     session: aiohttp.ClientSession, appid: int
 ) -> tuple[str | None, str]:

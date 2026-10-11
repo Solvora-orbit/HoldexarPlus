@@ -13,19 +13,22 @@
  * HB 固定传 'CNY'（priceMap = {CNY: fen}）。
  */
 import { computed, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
-import { bundlesApi, type BundleDetail, type GameListItem, type HumblePendingGame, type StoreTier } from '@/api/client'
+import { bundlesApi, type BundleDetail, type GameListItem, type HumblePendingGame, type PackMember, type StoreTier } from '@/api/client'
 import { formatCnyFen, formatMoney } from '@/api/regions'
 import { APP_SLUG } from '@/appInfo'
 import { useRegionsStore } from '@/stores/regions'
 import { useI18n } from '@/locales'
 import HlGameCard from '@/components/business/HlGameCard.vue'
-import { HlDrawer, HlEmpty, HlImg, HlSpinner } from '@/components/ui'
+import SteamBundleDrawer from '@/components/business/SteamBundleDrawer.vue'
+import { HlButton, HlDialog, HlDrawer, HlEmpty, HlImg, HlSpinner } from '@/components/ui'
 
 export interface BundleDrawerTierGame {
   title: string
   appid: number | null
   bundleId?: number | null
+  memberAppids?: PackMember[] | null
   isNew?: boolean
   unlockPriceMap?: Record<string, number> | null
 }
@@ -48,9 +51,13 @@ const props = defineProps<{
   pending: HumblePendingGame[]
   /** 抽屉宽度记忆键（HB 迁移沿用旧键保住用户已调宽度） */
   storageKey?: string
+  /** 单包重抓进行中（0.5.1；按钮禁用态） */
+  resetting?: boolean
+  /** 站点合辑成员卡片集（0.6.0，Fanatical；成员行封面/价格查此） */
+  memberItems?: GameListItem[]
 }>()
 
-const emit = defineEmits<{ (e: 'update:open', v: boolean): void }>()
+const emit = defineEmits<{ (e: 'update:open', v: boolean): void; (e: 'reset'): void }>()
 
 const openModel = computed({
   get: () => props.open,
@@ -74,12 +81,20 @@ const pendingByTitle = computed(() => {
   for (const p of props.pending) m.set(p.title, p)
   return m
 })
+/* 成员卡查找图（0.6.0）：items ∪ memberItems（成员 appid 不在顶层条目里） */
+const memberCardByAppid = computed(() => {
+  const m = new Map<number, GameListItem>()
+  for (const g of props.items) m.set(g.appid, g)
+  for (const g of props.memberItems ?? []) if (!m.has(g.appid)) m.set(g.appid, g)
+  return m
+})
 
-/** 非卡片条目状态 → 文案键（四态：关联中/收录中/未找到/Steam 捆绑包） */
+/** 非卡片条目状态 → 文案键（五态：关联中/收录中/未找到/Steam 捆绑包/站点合辑） */
 function humStatusKey(status: HumblePendingGame['status']): string {
   if (status === 'ingesting') return 'bundles.store.ingesting'
   if (status === 'not_found') return 'bundles.store.notFound'
   if (status === 'bundle') return 'bundles.store.bundleTag'
+  if (status === 'pack') return 'bundles.store.packTag'
   return 'bundles.store.resolving'
 }
 
@@ -90,19 +105,23 @@ function rowStatusKey(title: string, appid: number | null): string {
   return appid == null ? 'bundles.store.resolving' : 'bundles.store.ingesting'
 }
 
-// ── Steam 捆绑包卡（0.5.0）：bundleId 条目点击内嵌展开包内游戏比价 ──
+// ── Steam 捆绑包卡（0.6.0）：点击弹右侧二级详情抽屉（bundleState 详情
+//    缓存：卡片 meta 与抽屉共用一份，重复打开零请求）──
 const bundleState = reactive<{
   details: Map<number, BundleDetail>
   loading: Set<number>
-  expanded: Set<number>
-}>({ details: new Map(), loading: new Set(), expanded: new Set() })
+}>({ details: new Map(), loading: new Set() })
 
-async function toggleBundle(bundleId: number) {
-  if (bundleState.expanded.has(bundleId)) {
-    bundleState.expanded.delete(bundleId)
-    return
-  }
-  bundleState.expanded.add(bundleId)
+const steamOpen = ref(false)
+const steamBundleId = ref<number | null>(null)
+const steamBundleDetail = computed<BundleDetail | null>(() =>
+  (steamBundleId.value != null ? bundleState.details.get(steamBundleId.value) ?? null : null))
+const steamBundleLoading = computed(
+  () => steamBundleId.value != null && bundleState.loading.has(steamBundleId.value))
+
+async function openSteamBundle(bundleId: number) {
+  steamBundleId.value = bundleId
+  steamOpen.value = true
   if (bundleState.details.has(bundleId) || bundleState.loading.has(bundleId)) return
   bundleState.loading.add(bundleId)
   try {
@@ -110,7 +129,7 @@ async function toggleBundle(bundleId: number) {
     bundleState.details.set(bundleId, d)
   } catch {
     /* 拉取失败收起（下次点击重试）；卡片本体不受影响 */
-    bundleState.expanded.delete(bundleId)
+    if (steamBundleId.value === bundleId) steamOpen.value = false
   } finally {
     bundleState.loading.delete(bundleId)
   }
@@ -120,11 +139,58 @@ function bundleName(bundleId: number, fallback: string): string {
   return bundleState.details.get(bundleId)?.name ?? fallback
 }
 
-/* 档位选择器：选中的档按 kind 语义展示；换包/重开回第一档并清捆绑包展开态 */
+/* 游戏详情跳转（0.6.0）：站点合辑成员行直达（SteamBundlesPanel .sb-game 先例）*/
+const router = useRouter()
+
+function goMember(appid: number) {
+  router.push(`/game/${appid}`)
+}
+
+// ── 站点合辑卡（0.5.1）：合辑 SKU 站点明示的成员清单，展开即看（零请求）──
+const packState = reactive<{ expanded: Set<string> }>({ expanded: new Set() })
+
+/* 单包重抓确认（0.6.0）：HlDialog 层；确认后发事件并自动收起 */
+const resetAsk = ref(false)
+
+function onResetConfirm() {
+  resetAsk.value = false
+  emit('reset')
+}
+
+function togglePack(title: string) {
+  if (packState.expanded.has(title)) {
+    packState.expanded.delete(title)
+    return
+  }
+  packState.expanded.add(title)
+}
+
+function packMemberPrice(m: PackMember): string | null {
+  if (m.appid == null || !memberCardByAppid.value.has(m.appid)) return null
+  return formatCnyFen(memberCardByAppid.value.get(m.appid)!.basePriceFen)
+}
+
+function packMemberCover(m: PackMember): string | null {
+  if (m.appid == null || !memberCardByAppid.value.has(m.appid)) return null
+  return memberCardByAppid.value.get(m.appid)!.headerImage || null
+}
+
+/** 合辑卡免点击封面（0.6.0）：首个已入目录成员的卡图，无需展开即出图 */
+function packCover(members: PackMember[]): string | null {
+  for (const m of members) {
+    const cover = packMemberCover(m)
+    if (cover) return cover
+  }
+  return null
+}
+
+/* 档位选择器：选中的档按 kind 语义展示；换包/重开回第一档并收二级抽屉 */
 const activeTier = ref(0)
 watch(() => [props.open, props.tiers], () => {
   activeTier.value = 0
-  bundleState.expanded.clear()
+  steamOpen.value = false
+  steamBundleId.value = null
+  packState.expanded.clear()
 })
 
 const activeTierData = computed<StoreTier | null>(() => props.tiers[activeTier.value] ?? null)
@@ -199,6 +265,11 @@ const loosePending = computed(() =>
         target="_blank"
         rel="noopener noreferrer"
       >{{ t('bundles.store.official') }} ↗</a>
+      <!-- 单包删数据 + 重抓（0.5.1/0.6.0）：HlDialog 确认（popconfirm 在抽屉
+           overflow 里会被裁掉——0.6.0 实修「点了没反应」） -->
+      <HlButton size="sm" variant="text" :loading="resetting" @click="resetAsk = true">
+        {{ t('bundles.store.resetBtn') }}
+      </HlButton>
     </div>
     <div v-if="loading" class="bd-loading">
       <HlSpinner /> {{ t('library.loadingMore') }}
@@ -241,8 +312,8 @@ const loosePending = computed(() =>
               layout-mode="grid"
               :enabled-regions="regionsStore.enabledCodes"
             />
-            <!-- Steam 捆绑包卡（0.5.0）：条目按 bundle 命中，点击内嵌展开包内比价 -->
-            <div v-else-if="g.bundleId != null" class="bd-bundle" @click="toggleBundle(g.bundleId)">
+            <!-- Steam 捆绑包卡（0.6.0）：条目按 bundle 命中，点击弹右侧详情抽屉 -->
+            <div v-else-if="g.bundleId != null" class="bd-bundle" @click="openSteamBundle(g.bundleId)">
               <div class="bd-bundle__cover">
                 <HlImg
                   :src="bundleState.details.get(g.bundleId)?.headerImage || ''"
@@ -268,20 +339,47 @@ const loosePending = computed(() =>
               <div v-if="bundleState.loading.has(g.bundleId)" class="bd-bundle__loading">
                 <HlSpinner />
               </div>
-              <div v-else-if="bundleState.expanded.has(g.bundleId)" class="bd-bundle__games" @click.stop>
+            </div>
+            <!-- 站点合辑卡（0.6.0）：免点击出封面（首个已收录成员卡图）；
+                 成员行可点直达游戏详情，未关联成员如实标注不可点 -->
+            <div v-else-if="g.memberAppids?.length" class="bd-bundle" @click="togglePack(g.title)">
+              <div class="bd-bundle__cover">
+                <HlImg v-if="packCover(g.memberAppids)" :src="packCover(g.memberAppids)!" :alt="g.title" loading="lazy">
+                  <template #fallback>
+                    <span class="bd-bundle__glyph" aria-hidden="true">{{ g.title.slice(0, 1) }}</span>
+                  </template>
+                </HlImg>
+                <span v-else class="bd-bundle__glyph" aria-hidden="true">{{ g.title.slice(0, 1) }}</span>
+              </div>
+              <div class="bd-bundle__body">
+                <span class="bd-bundle__tag">{{ t('bundles.store.packTag') }}</span>
+                <span class="bd-bundle__name">{{ g.title }}</span>
+                <span class="bd-bundle__meta">
+                  {{ packState.expanded.has(g.title)
+                    ? t('bundles.store.packMeta', { n: g.memberAppids.length })
+                    : t('bundles.store.packExpand', { n: g.memberAppids.length }) }}
+                </span>
+              </div>
+              <div v-if="packState.expanded.has(g.title)" class="bd-bundle__games" @click.stop>
                 <div
-                  v-for="bg in bundleState.details.get(g.bundleId)?.games ?? []"
-                  :key="bg.appid"
+                  v-for="m in g.memberAppids"
+                  :key="m.title"
                   class="bd-bundle__game"
+                  :class="{ 'is-link': m.appid != null }"
+                  :role="m.appid != null ? 'link' : undefined"
+                  :tabindex="m.appid != null ? 0 : undefined"
+                  @click="m.appid != null && goMember(m.appid)"
+                  @keydown.enter="m.appid != null && goMember(m.appid)"
                 >
-                  <HlImg :src="bg.headerImage" :alt="bg.name ?? String(bg.appid)" loading="lazy">
+                  <HlImg v-if="packMemberCover(m)" :src="packMemberCover(m)!" :alt="m.title" loading="lazy">
                     <template #fallback>
-                      <span class="bd-bundle__game-glyph" aria-hidden="true">{{ (bg.name || '?').slice(0, 1) }}</span>
+                      <span class="bd-bundle__game-glyph" aria-hidden="true">{{ m.title.slice(0, 1) }}</span>
                     </template>
                   </HlImg>
-                  <span class="bd-bundle__game-name">{{ bg.name ?? t('bundles.steam.appidFallback', { id: bg.appid }) }}</span>
+                  <span v-else class="bd-bundle__game-glyph" aria-hidden="true">{{ m.title.slice(0, 1) }}</span>
+                  <span class="bd-bundle__game-name">{{ m.title }}</span>
                   <span class="bd-bundle__game-price">
-                    {{ formatCnyFen(bg.prices?.CN?.cnyFen ?? null) }}
+                    {{ packMemberPrice(m) ?? t('bundles.store.packMemberUnlinked') }}
                   </span>
                 </div>
               </div>
@@ -321,6 +419,27 @@ const loosePending = computed(() =>
       <HlEmpty v-if="!items.length && !loosePending.length && !tiers.length" icon="" size="sm">
         <p>{{ t('bundles.store.detailEmpty') }}</p>
       </HlEmpty>
+
+      <!-- 单包重抓确认（0.6.0）：弹窗层渲染，不受抽屉 overflow 裁剪 -->
+      <HlDialog v-model="resetAsk" :title="t('bundles.store.resetBtn')" :width="440">
+        <p class="bd-reset__tip">{{ t('bundles.store.resetConfirm') }}</p>
+        <template #footer>
+          <HlButton variant="text" size="sm" @click="resetAsk = false">
+            {{ t('common.cancel') }}
+          </HlButton>
+          <HlButton variant="primary" size="sm" @click="onResetConfirm">
+            {{ t('bundles.store.resetConfirmBtn') }}
+          </HlButton>
+        </template>
+      </HlDialog>
+
+      <!-- Steam 捆绑包详情（0.6.0）：非模态二级抽屉叠加，详情来自 bundleState 缓存 -->
+      <SteamBundleDrawer
+        v-model="steamOpen"
+        :detail="steamBundleDetail"
+        :loading="steamBundleLoading"
+        :fallback-title="steamBundleId != null ? bundleName(steamBundleId, '') : ''"
+      />
     </template>
   </HlDrawer>
 </template>
@@ -547,6 +666,16 @@ const loosePending = computed(() =>
   padding: 6px 12px;
   min-width: 0;
 }
+/* 成员行直达游戏详情（0.6.0）：可点行 hover 亲和态（交互规范） */
+.bd-bundle__game.is-link {
+  cursor: pointer;
+}
+.bd-bundle__game.is-link:hover {
+  background: var(--surface-inset);
+}
+.bd-bundle__game.is-link:hover .bd-bundle__game-name {
+  color: var(--accent);
+}
 .bd-bundle__game + .bd-bundle__game {
   border-top: 1px solid var(--surface-inset);
 }
@@ -664,5 +793,11 @@ const loosePending = computed(() =>
   flex-shrink: 0;
   font-size: 11px;
   color: var(--text-dim);
+}
+.bd-reset__tip {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
 }
 </style>

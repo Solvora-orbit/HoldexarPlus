@@ -6,7 +6,7 @@
 
 **本地 Steam 多区价格监控终端** —— Holdexar 独立分支 · 持续演进版
 
-[![Version](https://img.shields.io/badge/version-v0.5.0-orange)](../../releases)
+[![Version](https://img.shields.io/badge/version-v0.6.0-orange)](../../releases)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13%2B-blue?logo=python&logoColor=white)](https://www.python.org)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Vue 3](https://img.shields.io/badge/Frontend-Vue%203-42b883?logo=vuedotjs&logoColor=white)](https://vuejs.org)
@@ -54,6 +54,7 @@
 - **v0.4.1**（2026-10-11）：Fanatical 关联判据修正——steamId 缺失不再误标「非 Steam」（以 drm 字段为权威，58 条误标重走检索恢复），合辑 SKU（Double/Triple Pack、A + B、Pack/Bundle 收尾）如实直标 · 版本词表扩充 + 查询词「剥版本词」档（Premium/Legendary Edition 变体对准本体）· 完成 Mimosa 深度安全审计（25 项复核全为静态保守项，依赖 0 命中）
 - **v0.4.2**（2026-10-11）：撤回 v0.4.1 的「剥版本词」逻辑（用户裁定）——版本后缀可能是独立 Steam 捆绑包 SKU（如某些 Complete Edition 是合辑），剥词会把合辑错对到本体；词表回 v0.3.2 基线，宁留欠账不猜，已关联条目不受影响
 - **v0.5.0**（2026-10-11）：**捆绑包条目 ↔ Steam 捆绑包联动**——三站查不到的条目名在同一次 Steam 搜索页请求里顺带解析捆绑包，命中后复用 Steam 捆绑包功能全套链路，抽屉显示「Steam 捆绑包」卡并可展开包内比价 · **实验性功能区**（设置页开关 + 风险确认弹窗，默认关）：开启后侧栏出 Steampy 行情实验页（游戏 CDK 市场公开行情：最低 CDK 价/在售数/原价史低对照）· Fanatical「剩 355828 天」显示修复（站点用公元 3001 年表示永久在售，超 2100 年按无到期处理）
+- **v0.6.0**（2026-10-11：捆绑包大修）：**Steam 捆绑包联动换源修复**——v0.5.0 的搜索页捆绑包解析在实网从未命中（Steam 已把捆绑包移出搜索结果），改由本地捆绑包语料（爬虫日常发现的近 2 万条实名）精确匹配 · **捆绑包防误判**：带 Complete Edition 类版本后缀的条目不再错配本体游戏，先查捆绑包（Police Stories - Complete Edition 实为捆绑包 12051 而非游戏本体）· **站点合辑成员展开**：Fanatical 自造合辑 SKU（Double/Triple Pack 等）按站点明示的成员清单逐个关联（30 条历史欠账实网全解，77 名成员 100% 命中），抽屉「站点合辑」卡免点击出封面、成员行直达游戏详情 · **单包重抓**：抽屉「重抓此包」一键删数据重建 · **Steam 捆绑包卡**改右侧详情抽屉（包价对比 + 包内游戏直达）· 捆绑包 Sub 形态封面修复 · 联动入库写锁死锁根修（写事务内嵌套连接 → 出闸重排 + 悬空引用自愈补抓）· 迁移 v16 存量欠账自动重试
 
 **规划中**
 

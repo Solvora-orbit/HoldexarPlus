@@ -85,6 +85,91 @@ def _clean_name(n: str) -> str:
     return normalize_title(n)
 
 
+def _norm_light(n: str) -> str:
+    """轻量清洗（0.6.0 变体守卫用）：归一符号/标点但**不剥版本词**——
+    与 normalize_title 的差集即「该标题带被剥掉的版本/商标后缀」判据。"""
+    if not n:
+        return ""
+    n = unicodedata.normalize("NFKD", n)
+    n = "".join(c for c in n if not unicodedata.combining(c))
+    n = html.unescape(n)
+    n = n.lower()
+    n = n.replace("™", "").replace("®", "").replace("©", "")
+    n = n.replace("’", "'").replace("–", "-").replace("—", "-")
+    n = re.sub(r"[^\w\s]", "", n)
+    return re.sub(r"\s+", " ", n).strip()
+
+
+# 捆绑包变体守卫（0.6.0）：标题带 Complete/GOTY 等**被 normalize 剥掉的**版本词
+# 时，clean 层会把 "X - Complete Edition" 与本体 "X" 洗成同形——Steam 上这类
+# 变体常是独立**捆绑包 SKU**（实测 Police Stories - Complete Edition = 捆绑包
+# 12051，被错配成本体游戏 539470）。命中 app 后先按全名查捆绑包：本地语料
+# → 该 app 商店页购买选项里的 bundleid（名同款才认，宁缺勿猜）。
+async def _probe_bundle_for_variant(
+    session: aiohttp.ClientSession, title: str, appid: int, proxy: str | None
+) -> int | None:
+    """变体标题 + 已选 appid → 该游戏的捆绑包选项里按全名找 bundleid。
+
+    先本地语料（零请求），落空打一发 IStoreBrowseService 购买选项。
+    名称比对用 _norm_light（不剥版本词）：选项名与标题清洗后全等才认。"""
+    want = _norm_light(title)
+    if not want:
+        return None
+    from app.domains.metadata.bundle_corpus import load_bundle_corpus
+
+    for row in await load_bundle_corpus():
+        if _norm_light(str(row.get("name") or "")) == want:
+            return int(row["id"])
+    opts = await _fetch_app_bundle_options(session, appid, proxy)
+    for opt in opts:
+        if _norm_light(str(opt.get("name") or "")) == want:
+            return int(opt["id"])
+    return None
+
+
+async def _fetch_app_bundle_options(
+    session: aiohttp.ClientSession, appid: int, proxy: str | None
+) -> list[dict]:
+    """app 商店条目 → 购买选项里的捆绑包 [{id, name}]（请求失败 → 空）。"""
+    try:
+        from yarl import URL
+
+        from app.crawler.browse_store import StoreBrowseAPI
+
+        url = URL(StoreBrowseAPI.build_ids_url([{"appid": int(appid)}], "us", "english", extras=False))
+        async with session.get(
+            str(url), proxy=proxy, headers=_STORE_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=20),
+        ) as resp:
+            if resp.status != 200:
+                return []
+            data = await resp.json(content_type=None)
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[dict] = []
+    for it in ((data or {}).get("response") or {}).get("store_items") or []:
+        for opt in it.get("purchase_options") or []:
+            bun = opt.get("bundleid")
+            if bun:
+                out.append({"id": int(bun), "name": str(opt.get("purchase_option_name") or "")})
+    return out
+
+
+async def _guard_variant_appid(
+    session: aiohttp.ClientSession, title: str, appid: int, proxy: str | None
+) -> tuple[int | None, int | None]:
+    """app 命中后置守卫：标题剥过版本词（变体形态）才查捆绑包。
+
+    查到同名捆绑包 → (None, bundleid)（捆绑包被识别成游戏的根修）；查不到/
+    请求失败 → 原样 (appid, None)（行为不动）。非变体名零额外请求。"""
+    if _norm_light(title) == normalize_title(title):
+        return appid, None
+    bid = await _probe_bundle_for_variant(session, title, appid, proxy)
+    if bid is not None:
+        return None, bid
+    return appid, None
+
+
 def _pick_appid(title: str, hits: list[dict]) -> int | None:
     """检索命中列表 → appid：exact → 清洗名 → playtest 归一 → 前缀副标题 →
     相似度，五级匹配（前三级与 XGP 链同口径）。
@@ -191,9 +276,6 @@ async def _fetch_storesearch(
 _SEARCH_ANCHOR_RE = re.compile(
     r'<a[^>]*?href="(?:https?://store\.steampowered\.com)?/app/(\d+)[^"]*"[^>]*?>'
 )
-# 捆绑包行（0.5.0）：同一结果页里 data-ds-bundleid 锚 + 同款 title 配对——
-# 三站查不到 app 的条目名（Complete Edition 合辑等）常能按 bundle 命中
-_SEARCH_BUNDLE_ANCHOR_RE = re.compile(r'data-ds-bundleid="(\d+)"')
 _SEARCH_TITLE_RE = re.compile(r'<span class="title">([^<]+)</span>')
 
 
@@ -211,16 +293,6 @@ def _pair_anchors_with_titles(anchors: list[tuple[int, int]], titles: list[tuple
 def parse_search_rows(html_text: str) -> list[dict]:
     """搜索页 HTML → [{id, name}]（结果行序 = 相关度序）。"""
     anchors = [(m.start(), int(m.group(1))) for m in _SEARCH_ANCHOR_RE.finditer(html_text)]
-    titles = [
-        (m.start(), html.unescape(m.group(1)).strip())
-        for m in _SEARCH_TITLE_RE.finditer(html_text)
-    ]
-    return _pair_anchors_with_titles(anchors, titles)
-
-
-def parse_search_bundle_rows(html_text: str) -> list[dict]:
-    """搜索页 HTML → 捆绑包行 [{id: bundleid, name}]（相关度序）。"""
-    anchors = [(m.start(), int(m.group(1))) for m in _SEARCH_BUNDLE_ANCHOR_RE.finditer(html_text)]
     titles = [
         (m.start(), html.unescape(m.group(1)).strip())
         for m in _SEARCH_TITLE_RE.finditer(html_text)
@@ -274,19 +346,20 @@ def _pick_bundleid(title: str, rows: list[dict]) -> int | None:
 async def resolve_target(
     session: aiohttp.ClientSession, title: str, proxy: str | None
 ) -> tuple[int | None, int | None]:
-    """条目标题 → (Steam appid, Steam bundleid)（0.5.0）。
+    """条目标题 → (Steam appid, Steam bundleid)。
 
-    storesearch 阶段只产 appid（API 无 bundle）；搜索页阶段同页同时解析
-    app 行与 bundle 行——查 app 顺手拿 bundle，零额外请求。**app 命中优先
-    于任何更早的 bundle 命中**（bundle 只在 app 全链落空时兜底返回），
+    storesearch / 搜索页两级链只产 appid。**app 命中优先**；app 全链落空才
+    做 bundle 兜底——对**本地 bundles 表语料**（爬虫扫 app 店面页时从购买
+    选项发现的 Steam 捆绑包实名，随爬取持续增长）做 exact/clean 匹配。
+    0.5.0 曾按「搜索页 data-ds-bundleid 行」解析，实测 Steam 已把 bundle 行
+    移出搜索结果（6 个真实捆绑包名 0 命中），0.5.1 换源本地语料。
     全链失败 (None, None) 由调用方记账。"""
     for term in _query_terms(title):
         hits = await _fetch_storesearch(session, term, proxy)
         if hits:
             pick = _pick_appid(title, hits)
             if pick is not None:
-                return pick, None
-    bundle_pick: int | None = None
+                return await _guard_variant_appid(session, title, pick, proxy)
     for i, term in enumerate(_query_terms(title)):
         if i:
             await asyncio.sleep(0.5)
@@ -295,10 +368,19 @@ async def resolve_target(
             continue
         pick = _pick_appid(title, parse_search_rows(page))
         if pick is not None:
-            return pick, bundle_pick
-        if bundle_pick is None:
-            bundle_pick = _pick_bundleid(title, parse_search_bundle_rows(page))
-    return None, bundle_pick
+            return await _guard_variant_appid(session, title, pick, proxy)
+    return None, await resolve_bundle_only(title)
+
+
+async def resolve_bundle_only(title: str) -> int | None:
+    """条目标题 → Steam bundleid（**只查本地 bundles 语料，不碰 app 检索**）。
+
+    合辑 SKU（"A & B Double Pack" 等）专用入口：这类名字走 app 五级
+    前缀/相似必会错对到首个成员（0.4.1 合辑拦截的防误判语义），bundle 行
+    名称规范，exact/clean 两级宁缺勿猜。"""
+    from app.domains.metadata.bundle_corpus import load_bundle_corpus
+
+    return _pick_bundleid(title, await load_bundle_corpus())
 
 
 async def resolve_appid(

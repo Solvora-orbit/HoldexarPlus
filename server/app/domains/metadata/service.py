@@ -48,6 +48,7 @@ from app.domains.metadata.resolver import (  # noqa: F401 —— 再导出：测
     _query_terms,
     normalize_title,
     resolve_appid as _resolve_appid_impl,
+    resolve_bundle_only as _resolve_bundle_only_impl,
     resolve_target as _resolve_target_impl,
 )
 from app.crawler.epic_free import (
@@ -425,6 +426,14 @@ async def _resolve_target(
     bundle 仅在 app 全链落空时兜底返回（app 命中优先）。三站查不到 app 的
     条目（Complete Edition 合辑等）按 Steam 捆绑包联动入库与展示。"""
     return await _resolve_target_impl(session, title, proxy)
+
+
+async def _resolve_bundle_only(title: str) -> int | None:
+    """合辑 SKU → Steam bundleid（0.5.1）：只对本地 bundles 语料做
+    exact/clean 匹配，不碰 app 检索——合辑名走 app 五级前缀/相似必会
+    错对到首个成员（0.4.1 合辑拦截的防误判语义保留）。三站查不到 app 的
+    条目按 Steam 捆绑包联动入库与展示。"""
+    return await _resolve_bundle_only_impl(title)
 
 
 async def _mark_game_hb(appid: int, title: str, label: str) -> None:

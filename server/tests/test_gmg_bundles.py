@@ -380,3 +380,82 @@ async def test_mark_seen_and_list(monkeypatch):
     lst2 = await gmg.list_bundles()
     assert next(b for b in lst2["bundles"] if b["slug"] == SLUG_A)["isNew"] is False
     assert await gmg.mark_seen("gmgtest-unknown") is False
+
+
+# ─── 单包删数据 + 重抓（0.5.1）─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_reset_bundle_clears_and_refetches(monkeypatch):
+    """reset_bundle：条目/档位清空 → 后台单包重建（详情+分档归属同链）；
+    acked_at 保留（重抓不复活 NEW）。"""
+    import asyncio as _a
+    from datetime import datetime
+
+    async def fake_resolve(session, title, proxy):
+        return APP_A1 if title == "Quarry Game" else (APP_A2 if title == "Roller Game" else None)
+
+    async def fake_run(specs, **_):
+        return []
+
+    async def no_sleep(_: float) -> None:
+        return None
+
+    _stub_network(monkeypatch)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", _as_target(fake_resolve))
+    monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run)
+    monkeypatch.setattr(gmg.asyncio, "sleep", no_sleep)
+
+    now_dt = datetime(2026, 10, 11, 12, 0, 0)
+    async with get_session_factory()() as session:
+        session.add(GmgBundle(
+            slug=SLUG_A, name="Alpha Bundle", game_count=1, acked_at=now_dt,
+            url="https://www.greenmangamingbundles.com/bundles/gmgtest-alpha",
+            first_seen_at=now_dt, last_seen_at=now_dt, on_sale=True,
+            tiers_json='[{"id": "stale", "titles": ["Stale"]}]',
+        ))
+        session.add(GmgBundleGame(slug=SLUG_A, appid=999999, title="Stale"))
+        await session.commit()
+
+    res = await gmg.reset_bundle(SLUG_A)
+    assert res["ok"] is True
+    async with get_session_factory()() as session:
+        assert (
+            await session.execute(
+                select(GmgBundleGame).where(GmgBundleGame.slug == SLUG_A)
+            )
+        ).scalars().all() == []
+        a = await session.get(GmgBundle, SLUG_A)
+        assert a.tiers_json is None and a.game_count == 0
+
+    others = [t for t in _a.all_tasks() if t is not _a.current_task()]
+    await _a.gather(*others)
+
+    async with get_session_factory()() as session:
+        a = await session.get(GmgBundle, SLUG_A)
+        assert a is not None and a.tiers_json and "stale" not in a.tiers_json
+        assert a.acked_at is not None
+        games = (
+            await session.execute(
+                select(GmgBundleGame).where(GmgBundleGame.slug == SLUG_A)
+            )
+        ).scalars().all()
+        by_title = {g.title: g for g in games}
+        assert by_title["Quarry Game"].appid == APP_A1
+        assert by_title["Roller Game"].appid == APP_A2
+        assert a.game_count == len(games)
+
+
+@pytest.mark.asyncio
+async def test_reset_bundle_unknown_and_locked(monkeypatch):
+    """未知 slug 报「包不存在」；全量刷新持锁时拒绝。"""
+    import asyncio as _a
+
+    res = await gmg.reset_bundle("gmgtest-nonexistent")
+    assert res["ok"] is False and "不存在" in res["error"]
+
+    lock = _a.Lock()
+    await lock.acquire()
+    monkeypatch.setattr(gmg, "_REFRESH_LOCK", lock)
+    res2 = await gmg.reset_bundle(SLUG_A)
+    assert res2["ok"] is False and "刷新" in res2["error"]

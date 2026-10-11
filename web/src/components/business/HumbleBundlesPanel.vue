@@ -49,7 +49,7 @@ const {
   bundles, loading, running, ingestRunning, ingestPending,
   expanded, shown, hiddenCount,
   open, detailLoading, detail, detailItems, detailPending, detailTiers,
-  refresh, ingestNow, openBundle, period, daysLeft, urgencyClass,
+  resetting, refresh, ingestNow, openBundle, resetBundle, period, daysLeft, urgencyClass,
 } = src
 
 /** 卡/抽屉头销量（已购 N，千分位；null = 未抓到过不显示） */
@@ -168,7 +168,9 @@ const drawerPeriod = computed(() => (detail.value ? period(detail.value) : ''))
       :tiers="detailTiers"
       :items="(detailItems as GameListItem[])"
       :pending="detailPending"
+      :resetting="resetting"
       :storage-key="`${APP_SLUG}.humble.drawer-w`"
+      @reset="resetBundle"
     />
   </div>
 </template>

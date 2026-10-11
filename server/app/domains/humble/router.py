@@ -38,6 +38,18 @@ async def refresh() -> dict:
     return await service.start_refresh()
 
 
+@router.post("/bundles/{slug}/reset")
+async def reset_bundle(slug: str) -> dict:
+    """单包删数据 + 重抓（0.5.1）：清条目/档位/价格后后台单包重建，立即返回。
+    未知 slug 404；刷新进行中 409。"""
+    res = await service.reset_bundle(slug)
+    if not res.get("ok"):
+        err = str(res.get("error"))
+        code = 409 if ("刷新" in err or "重抓" in err) else 404
+        raise HTTPException(status_code=code, detail=err)
+    return res
+
+
 @router.post("/bundles/ingest-now")
 async def ingest_now() -> dict:
     """立即跑一轮目录收录扫描（后台分批首爬，立即返回；bundles 端点

@@ -25,6 +25,7 @@ export interface BundleSourceApi {
   seen: (slug: string) => Promise<{ ok: boolean }>
   refresh: () => Promise<{ ok: boolean; started: boolean; running: boolean }>
   ingestNow: () => Promise<{ ok: boolean; started: boolean; running: boolean }>
+  reset: (slug: string) => Promise<{ ok: boolean; started: boolean }>
 }
 
 export function useBundleSource(
@@ -164,6 +165,8 @@ export function useBundleSource(
   const detailTotal = ref(0)
   const detailPending = ref<HumblePendingGame[]>([])
   const detailTiers = ref<StoreTier[]>([])
+  /** 站点合辑成员卡片集（0.6.0；与 items 分开——成员非顶层条目） */
+  const detailMemberItems = ref<GameListItem[]>([])
 
   const cardByAppid = computed(() => {
     const m = new Map<number, GameListItem>()
@@ -187,6 +190,25 @@ export function useBundleSource(
 
   let detailSeq = 0
 
+  /** 详情载荷落 state（openBundle / 重抓后重载共用；seq 防旧响应覆盖） */
+  async function fetchDetailInto(slug: string, seq: number) {
+    detailLoading.value = true
+    try {
+      const res = (await api.bundleDetail(slug)) as unknown as Record<string, unknown>
+      if (seq !== detailSeq) return // 抽屉已重开（换包），丢弃旧响应
+      detail.value = { ...(detail.value as object), ...(res as object) } as HumbleBundleItem | StoreBundleItem
+      detailItems.value = (res.items as GameListItem[]) ?? []
+      detailTotal.value = (res.total as number) ?? 0
+      detailPending.value = (res.pending as HumblePendingGame[]) ?? []
+      detailMemberItems.value = (res.memberItems as GameListItem[]) ?? []
+      detailTiers.value = opts?.mapTiers ? opts.mapTiers(res) : ((res.tiers as StoreTier[]) ?? [])
+    } catch (e) {
+      if (seq === detailSeq) message.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      if (seq === detailSeq) detailLoading.value = false
+    }
+  }
+
   async function openBundle(b: HumbleBundleItem | StoreBundleItem) {
     const seq = ++detailSeq
     detail.value = b
@@ -194,25 +216,41 @@ export function useBundleSource(
     detailTotal.value = 0
     detailPending.value = []
     detailTiers.value = []
+    detailMemberItems.value = []
     open.value = true
-    detailLoading.value = true
-    try {
-      const res = (await api.bundleDetail(b.slug)) as unknown as Record<string, unknown>
-      if (seq !== detailSeq) return // 抽屉已重开（换包），丢弃旧响应
-      detail.value = { ...b, ...(res as object) } as HumbleBundleItem | StoreBundleItem
-      detailItems.value = (res.items as GameListItem[]) ?? []
-      detailTotal.value = (res.total as number) ?? 0
-      detailPending.value = (res.pending as HumblePendingGame[]) ?? []
-      detailTiers.value = opts?.mapTiers ? opts.mapTiers(res) : ((res.tiers as StoreTier[]) ?? [])
-    } catch (e) {
-      if (seq === detailSeq) message.error(e instanceof Error ? e.message : String(e))
-    } finally {
-      if (seq === detailSeq) detailLoading.value = false
-    }
+    await fetchDetailInto(b.slug, seq)
     /* 点开即已读：本地先清徽章（即时反馈），再向后端记账 */
     if (b.isNew) {
       b.isNew = false
       try { await api.seen(b.slug) } catch { /* 已读失败不扰：下次点开重试 */ }
+    }
+  }
+
+  // ─── 单包删数据 + 重抓（0.5.1）：确认气泡在抽屉（HlPopconfirm），这里直接执行；
+  //     后台重建（合辑成员解析可达数分钟）——先看清空态，再延迟重载看进度/结果 ───
+  const resetting = ref(false)
+
+  async function resetBundle() {
+    const slug = detail.value?.slug
+    if (!slug || resetting.value) return
+    resetting.value = true
+    try {
+      const r = await api.reset(slug)
+      if (r.ok) {
+        message.info(t('bundles.store.resetStarted'))
+        const seq = ++detailSeq
+        detailPending.value = []
+        detailTiers.value = []
+        detailItems.value = []
+        detailMemberItems.value = []
+        void fetchDetailInto(slug, seq)
+        window.setTimeout(() => { void fetchDetailInto(slug, ++detailSeq) }, 15000)
+        window.setTimeout(() => { void fetchDetailInto(slug, ++detailSeq) }, 45000)
+      }
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      resetting.value = false
     }
   }
 
@@ -221,9 +259,10 @@ export function useBundleSource(
     bundles, loading, running, ingestRunning, ingestPending,
     expanded, shown, hiddenCount,
     open, detailLoading, detail, detailItems, detailTotal, detailPending, detailTiers,
-    cardByAppid, drawerWidth,
+    detailMemberItems,
+    cardByAppid, drawerWidth, resetting,
     // 动作
-    load, refresh, ingestNow, openBundle, stopPoll,
+    load, refresh, ingestNow, openBundle, resetBundle, stopPoll,
     // 展示助手
     period, daysLeft, isLongRunning, urgencyClass, humStatusKey, rowStatusKey,
   }

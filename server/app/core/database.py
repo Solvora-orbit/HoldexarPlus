@@ -250,9 +250,11 @@ _TABLE_EXTRA_COLUMNS: dict[str, dict[str, str]] = {    "games": {
         # Steam 捆绑包引用（0.5.0）：app 检索不到、按 bundle 命中的条目
         "bundle_id": "INTEGER",
     },
-    # F 站/GMG 条目表（0.4.0 新建）存量库补 Steam 捆绑包引用列（0.5.0）
+    # F 站/GMG 条目表（0.4.0 新建）存量库补 Steam 捆绑包引用列（0.5.0）；
+    # F 站另补站点合辑成员清单列（0.5.1：合辑 SKU 详情成员解析结果）
     "fanatical_bundle_games": {
         "bundle_id": "INTEGER",
+        "member_appids_json": "TEXT",
     },
     "gmg_bundle_games": {
         "bundle_id": "INTEGER",
@@ -368,7 +370,7 @@ def _ensure_schema(sync_conn) -> None:
 #   2. _MIGRATIONS 追加 (版本号, 描述, SQL 列表)；SQL 须幂等（中断续跑 +
 #      用户库版本乱序防御），复杂逻辑可登记 async fn(engine) 同位元素
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 # 零小数货币（Steam 以整数计价）：旧捆绑包链路的除数表按 1 处理，与「统一存分」
 # 的新约定差 100 倍——v2 归一的目标集合
@@ -951,6 +953,43 @@ async def _migrate_fanatical_attempts_reset(conn) -> None:
     ))
 
 
+async def _migrate_bundle_linkage_attempts_reset(conn) -> None:
+    """v16：三站 Steam 捆绑包联动换源（0.5.1 本地语料匹配）后重置欠账尝试。
+
+    0.5.0 的 bundle 兜底建立「Steam 搜索页返回 data-ds-bundleid 行」的假设
+    上，实测该标记已从搜索页移除（6 个真实捆绑包名 0 命中）——联动从未产出
+    过任何关联；0.5.1 换源本地 bundles 表语料后，烧光 attempts 被永久搁置的
+    欠账行清零重吃新链红利（Fanatical 合辑 SKU 同批重走 bundle-only 联动）；
+    真非 Steam 条目三轮后自然回落 not_found。幂等：只动未解析且未联动行。
+    带表存在守卫（同 v13 模式）。"""
+    from sqlalchemy import text
+
+    has_humble = await conn.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='humble_bundle_games'")
+    )
+    if has_humble.first() is not None:
+        await conn.execute(text(
+            "UPDATE humble_bundle_games SET resolve_attempts = 0"
+            " WHERE appid IS NULL AND bundle_id IS NULL"
+        ))
+    has_fanatical = await conn.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='fanatical_bundle_games'")
+    )
+    if has_fanatical.first() is not None:
+        await conn.execute(text(
+            "UPDATE fanatical_bundle_games SET resolve_attempts = 0"
+            " WHERE appid IS NULL AND bundle_id IS NULL"
+        ))
+    has_gmg = await conn.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='gmg_bundle_games'")
+    )
+    if has_gmg.first() is not None:
+        await conn.execute(text(
+            "UPDATE gmg_bundle_games SET resolve_attempts = 0"
+            " WHERE appid IS NULL AND bundle_id IS NULL"
+        ))
+
+
 # (目标版本, 说明, 迁移体)：迁移体 = SQL 语句列表，或 async callable(engine)
 _MIGRATIONS: list[tuple[int, str, object]] = [
     (2, "bundle_region_prices 零小数货币单位归一（元→分 + cny_fen 去虚高）",
@@ -1009,6 +1048,10 @@ _MIGRATIONS: list[tuple[int, str, object]] = [
     (15, "fanatical_bundle_games.resolve_attempts 重置（0.4.1 判据修正：drm 权威"
          " + 检索兜底，0.4.0 误直标的 58 条重走检索；合辑 SKU 由新规则重新直标）",
      _migrate_fanatical_attempts_reset),
+    (16, "三站 bundle_games.resolve_attempts 重置（0.5.1 Steam 捆绑包联动换源："
+         "搜索页 bundle 行已下线，改本地 bundles 语料匹配，烧光尝试的欠账行"
+         "重吃联动红利；真非 Steam 条目自然回落 not_found）",
+     _migrate_bundle_linkage_attempts_reset),
 ]
 
 

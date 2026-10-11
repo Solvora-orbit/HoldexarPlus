@@ -35,7 +35,7 @@ from datetime import datetime, timedelta
 from urllib.parse import quote, urlparse
 
 import aiohttp
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 
 from app.core.database import WritePriority, get_session_factory, write_gate
 from app.domains.gmg.models import GmgBundle, GmgBundleGame
@@ -425,6 +425,16 @@ async def _sync_bundle_detail(
 
     from app.crawler.utils import get_beijing_time_obj as _now
 
+    # bundle 命中入库（0.6.0 根修 database is locked）：ensure 自带写闸且
+    # 另开连接写 bundles 主档——必须在外层写事务之前（fanatical/humble 同型）
+    for bid in dict.fromkeys(resolved_bundle.values()):
+        try:
+            from app.domains.bundles import refresh as bundles_refresh
+
+            await bundles_refresh.ensure_bundle_stored(bid)
+        except Exception:  # noqa: BLE001
+            logger.exception("[gmg-bundles] bundle %d 联动入库异常", bid)
+
     now = _now().replace(tzinfo=None)
     async with write_gate(WritePriority.BACKGROUND, label="gmg_sync"), \
             get_session_factory()() as s:
@@ -445,15 +455,6 @@ async def _sync_bundle_detail(
                 ).where(GmgBundleGame.slug == bundle.slug)
             )
         }
-        # bundle 联动入库（0.5.0）：命中 bundleid 的条目复用 bundles 域抓取
-        # 落库（不挂 monitoring track）；失败仍落 bundle_id 引用，下轮重试
-        for title, bid in resolved_bundle.items():
-            try:
-                from app.domains.bundles import refresh as bundles_refresh
-
-                await bundles_refresh.ensure_bundle_stored(bid)
-            except Exception:  # noqa: BLE001
-                logger.exception("[gmg-bundles] bundle %d 联动入库异常", bid)
         for title in titles:
             if title in resolved:
                 if title in existing:
@@ -531,6 +532,24 @@ def _radio_value_of(page: str, tier_id: str) -> str | None:
     return m.group(1) if m else None
 
 
+async def _heal_bundle_refs() -> None:
+    """联动悬空引用自愈（0.6.0）：条目带 bundle_id 但包主档缺失（ensure
+    偶发失败=瞬时写锁/网络抖动）→ 补抓。bundle_known 使这类条目不再进 sync，
+    不补就永远缺主档（捆绑包卡无价无图）。"""
+    from app.domains.bundles.refresh import heal_bundle_refs
+
+    async with get_session_factory()() as s:
+        refs = (
+            await s.execute(
+                select(GmgBundleGame.bundle_id)
+                .where(GmgBundleGame.bundle_id.is_not(None))
+            )
+        ).scalars().all()
+    healed = await heal_bundle_refs([int(r) for r in refs])
+    if healed:
+        logger.info("[gmg-bundles] 联动悬空引用补抓 %d 个", healed)
+
+
 async def refresh_gmg_bundles() -> dict:
     """列表 + 在售包详情全链路（每日调度与手动触发同入口，幂等）。
 
@@ -582,6 +601,7 @@ async def refresh_gmg_bundles() -> dict:
                 done.append(await _sync_bundle_detail(session, proxy, bundle, mark_updated=True))
         unresolved_total = sum(len(d.get("unresolved") or []) for d in done)
         ingest = await scan_missing_ingest()
+        await _heal_bundle_refs()
         logger.info("[gmg-bundles] 刷新完成：列表 %d 包，详情 %d 包（未解析 %d，收录 %d）",
                     len(rows), len(done), unresolved_total, ingest.get("queued", 0))
         return {"ok": True, "listed": len(rows), "details": done,
@@ -595,6 +615,56 @@ async def start_refresh() -> dict:
         return {"ok": True, "started": False, "running": True}
     _refresh_task = asyncio.create_task(refresh_gmg_bundles())
     return {"ok": True, "started": True, "running": True}
+
+
+_reset_task: asyncio.Task | None = None
+
+
+async def reset_bundle(slug: str) -> dict:
+    """单包删数据 + 重抓（0.5.1）：条目行/档位清零 → 后台单包重抓。
+
+    包主档保留（列表级元数据，删除会让面板少一行而下轮列表抓取原样
+    重建）；acked_at 保留（重抓不复活 NEW 徽章）。重抓串行于
+    _REFRESH_LOCK；重抓失败（下架/网络/软封锁）数据保持清空，stale
+    矩阵按 tiers_json NULL 自愈重抓。"""
+    global _reset_task
+    if _REFRESH_LOCK.locked():
+        return {"ok": False, "error": "已有 GMG 捆绑包刷新在进行"}
+    if _reset_task is not None and not _reset_task.done():
+        return {"ok": False, "error": "已有 GMG 单包重抓在进行"}
+    async with write_gate(WritePriority.BACKGROUND, label="gmg_reset"), \
+            get_session_factory()() as s:
+        bundle = await s.get(GmgBundle, slug)
+        if bundle is None:
+            return {"ok": False, "error": "包不存在"}
+        snapshot = {"name": bundle.name, "url": bundle.url}
+        await s.execute(
+            delete(GmgBundleGame).where(GmgBundleGame.slug == slug)
+        )
+        await s.execute(
+            update(GmgBundle).where(GmgBundle.slug == slug)
+            .values(tiers_json=None, game_count=0)
+        )
+        await s.commit()
+    # 强引用登记（防 GC 静默回收，同 HB 0.6.0 修）
+    _reset_task = asyncio.create_task(_reset_refetch(slug, snapshot))
+    return {"ok": True, "started": True}
+
+
+async def _reset_refetch(slug: str, snapshot: dict) -> None:
+    """单包重抓后台任务：抓详情页全量重建条目/档位（与刷新同链同语义）。"""
+    if _REFRESH_LOCK.locked():
+        logger.info("[gmg-bundles] 单包重抓跳过（全量刷新进行中，会顺带重建）: %s", slug)
+        return
+    async with _REFRESH_LOCK:
+        proxy = await _strategy_proxy()
+        connector = aiohttp.TCPConnector(limit=4, ttl_dns_cache=60)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            bundle = GmgBundle(slug=slug, name=snapshot["name"], url=snapshot["url"])
+            res = await _sync_bundle_detail(session, proxy, bundle, mark_updated=True)
+        await scan_missing_ingest()
+        await _heal_bundle_refs()
+        logger.info("[gmg-bundles] 单包重抓完成: %s → ok=%s", slug, res.get("ok"))
 
 
 # ── 收录链（与 humble 域同型）─────────────────────────────────────

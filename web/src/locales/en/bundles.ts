@@ -54,6 +54,14 @@ const bundles: Partial<Record<MessageKey, string>> = {
   'bundles.store.bundleTag': 'Steam bundle',
   'bundles.store.bundleMeta': '{n} games · ¥{price}',
   'bundles.store.bundleExpand': 'Click to expand in-bundle price comparison',
+  'bundles.store.packTag': 'Site pack',
+  'bundles.store.packMeta': '{n} games (from site data)',
+  'bundles.store.packExpand': '{n} games · click to expand',
+  'bundles.store.packMemberUnlinked': 'unlinked',
+  'bundles.store.resetBtn': 'Re-fetch this bundle',
+  'bundles.store.resetConfirm': 'Delete this bundle\'s entries and tiers, then re-fetch? Other bundles and your game library are untouched',
+  'bundles.store.resetConfirmBtn': 'Re-fetch',
+  'bundles.store.resetStarted': 'Cleared, re-fetching in background',
   'bundles.store.tier': 'Tier {i}',
   'bundles.store.tierEmpty': 'No games to show for this tier',
   'bundles.store.tierBar': 'Price tiers',
@@ -79,6 +87,7 @@ const bundles: Partial<Record<MessageKey, string>> = {
   'bundles.steam.appidFallback': 'AppID {id}',
   'bundles.steam.cnPrice': 'CN',
   'bundles.steam.lowest': 'Lowest',
+  'bundles.steam.diff': 'Diff +{price}',
 
   /* Drawer completion bar */
   'bundles.status.owned': '✅ You already own everything',

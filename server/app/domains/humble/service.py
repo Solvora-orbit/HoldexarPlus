@@ -30,7 +30,7 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 import aiohttp
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 
 from app.core.database import WritePriority, get_session_factory, write_gate
 from app.domains.humble.models import HumbleBundle, HumbleBundleGame
@@ -429,6 +429,19 @@ async def _sync_bundle_detail(
             }
         need_ingest = sorted({a for a in resolved.values() if a not in have})
 
+    # bundle 命中入库（0.6.0 根修 database is locked）：ensure_bundle_stored
+    # 自带写闸并**另开一条连接**写 bundles 主档——必须放在外层写事务之前；
+    # 嵌在闸内时外层未提交的 WAL 写锁与该新连接互等（外层又在 await 它），
+    # busy_timeout 60s 到点即抛锁错（fanatical 同型，proxypool 分离范式）。
+    # 失败仍落引用，刷新尾 heal_bundle_refs 补抓主档。
+    for bid in dict.fromkeys(resolved_bundle.values()):
+        try:
+            from app.domains.bundles import refresh as bundles_refresh
+
+            await bundles_refresh.ensure_bundle_stored(bid)
+        except Exception:  # noqa: BLE001
+            logger.exception("[humble-bundles] bundle %d 联动入库异常", bid)
+
     now = get_beijing_time_obj().replace(tzinfo=None)
     async with write_gate(WritePriority.BACKGROUND, label="humble_sync"), get_session_factory()() as s:
         if detail["price_cny_fen"] is not None:
@@ -460,15 +473,6 @@ async def _sync_bundle_detail(
                 ).where(HumbleBundleGame.slug == bundle.slug)
             )
         }
-        # bundle 联动入库（0.5.0）：命中 bundleid 的条目复用 bundles 域抓取
-        # 落库（不挂 monitoring track）；失败仍落 bundle_id 引用，下轮重试
-        for title, bid in resolved_bundle.items():
-            try:
-                from app.domains.bundles import refresh as bundles_refresh
-
-                await bundles_refresh.ensure_bundle_stored(bid)
-            except Exception:  # noqa: BLE001
-                logger.exception("[humble-bundles] bundle %d 联动入库异常", bid)
         for title in titles:
             if title in resolved:
                 if title in existing:
@@ -550,6 +554,24 @@ async def _sync_bundle_detail(
     return {"slug": bundle.slug, "ok": True, "titles": len(titles),
             "resolved": len(resolved), "pendingRetry": len(pending_known),
             "ingestQueued": len(need_ingest), "unresolved": unresolved}
+
+
+async def _heal_bundle_refs() -> None:
+    """联动悬空引用自愈（0.6.0）：条目带 bundle_id 但包主档缺失（ensure
+    偶发失败=瞬时写锁/网络抖动）→ 补抓。bundle_known 使这类条目不再进 sync，
+    不补就永远缺主档（捆绑包卡无价无图）。"""
+    from app.domains.bundles.refresh import heal_bundle_refs
+
+    async with get_session_factory()() as s:
+        refs = (
+            await s.execute(
+                select(HumbleBundleGame.bundle_id)
+                .where(HumbleBundleGame.bundle_id.is_not(None))
+            )
+        ).scalars().all()
+    healed = await heal_bundle_refs([int(r) for r in refs])
+    if healed:
+        logger.info("[humble-bundles] 联动悬空引用补抓 %d 个", healed)
 
 
 async def refresh_humble_bundles() -> dict:
@@ -635,6 +657,7 @@ async def refresh_humble_bundles() -> dict:
         # 连同历史欠账一起批量登记首爬——收录链独立于详情抓取，抓取失败时
         # 也能单独续跑（调度器另有每日一拍）
         ingest = await scan_missing_ingest()
+        await _heal_bundle_refs()
         logger.info("[humble-bundles] 刷新完成：列表 %d 包，详情 %d 包（未解析 %d，收录 %d）",
                     len(rows), len(done), unresolved_total, ingest.get("queued", 0))
         return {"ok": True, "listed": len(rows), "details": done,
@@ -648,6 +671,58 @@ async def start_refresh() -> dict:
         return {"ok": True, "started": False, "running": True}
     _refresh_task = asyncio.create_task(refresh_humble_bundles())
     return {"ok": True, "started": True, "running": True}
+
+
+_reset_task: asyncio.Task | None = None
+
+
+async def reset_bundle(slug: str) -> dict:
+    """单包删数据 + 重抓（0.5.1）：条目行/档位/价格清零 → 后台单包重抓。
+
+    包主档保留（slug/名称/链接/封面 = 列表级元数据，删了面板立即少一行，
+    而下一轮列表抓取原样重建，删除没有意义）；acked_at 也保留（重抓不该
+    复活 NEW 徽章）。重抓串行于 _REFRESH_LOCK——刷新进行中拒绝（避免
+    半删除状态与全量刷新交错）；重抓页失败（下架/网络）时数据保持清空，
+    stale 矩阵按 tiers_json NULL 自愈重抓。"""
+    global _reset_task
+    if _REFRESH_LOCK.locked():
+        return {"ok": False, "error": "已有 HB 捆绑包刷新在进行"}
+    if _reset_task is not None and not _reset_task.done():
+        return {"ok": False, "error": "已有 HB 单包重抓在进行"}
+    async with write_gate(WritePriority.BACKGROUND, label="humble_reset"), \
+            get_session_factory()() as s:
+        bundle = await s.get(HumbleBundle, slug)
+        if bundle is None:
+            return {"ok": False, "error": "包不存在"}
+        snapshot = {"name": bundle.name, "url": bundle.url}
+        await s.execute(
+            delete(HumbleBundleGame).where(HumbleBundleGame.slug == slug)
+        )
+        await s.execute(
+            update(HumbleBundle).where(HumbleBundle.slug == slug)
+            .values(tiers_json=None, price_cny_fen=None, sold_count=None, game_count=0)
+        )
+        await s.commit()
+    # 强引用登记：asyncio 仅弱保任务，裸 create_task 可能被 GC 静默回收
+    # （0.6.0 修「点了没反应」）——单飞互斥同时靠这个句柄判活
+    _reset_task = asyncio.create_task(_reset_refetch(slug, snapshot))
+    return {"ok": True, "started": True}
+
+
+async def _reset_refetch(slug: str, snapshot: dict) -> None:
+    """单包重抓后台任务：抓详情页全量重建条目/档位（与刷新同链同语义）。"""
+    if _REFRESH_LOCK.locked():
+        logger.info("[humble-bundles] 单包重抓跳过（全量刷新进行中，会顺带重建）: %s", slug)
+        return
+    async with _REFRESH_LOCK:
+        proxy = await _strategy_proxy()
+        connector = aiohttp.TCPConnector(limit=4, ttl_dns_cache=60)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            bundle = HumbleBundle(slug=slug, name=snapshot["name"], url=snapshot["url"])
+            res = await _sync_bundle_detail(session, proxy, bundle, mark_updated=True)
+        await scan_missing_ingest()
+        await _heal_bundle_refs()
+        logger.info("[humble-bundles] 单包重抓完成: %s → ok=%s", slug, res.get("ok"))
 
 
 # 单批首爬上限 × 单轮批次上限：防极端候选打爆队列；一轮最多 2000 款，

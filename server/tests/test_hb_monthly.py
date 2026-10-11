@@ -170,22 +170,7 @@ def test_edition_suffix_kept():
     assert hb._clean_name("Forza Horizon 5: Premium Edition") == "forza horizon 5 premium edition"
 
 
-# ─── 0.5.0 Steam 捆绑包联动（搜索页 bundle 锚 + resolve_target 双返回）───
-
-
-def test_parse_search_bundle_rows():
-    from app.domains.metadata import resolver
-
-    page = """
-    <a href="https://store.steampowered.com/app/208650/Batman_Arkham_Knight/" data-ds-appid="208650">
-      <span class="title">Batman: Arkham Knight</span></a>
-    <a href="https://store.steampowered.com/bundle/20515/Batman_Arkham_Collection/" data-ds-bundleid="20515">
-      <span class="title">Batman: Arkham Collection</span></a>
-    """
-    apps = resolver.parse_search_rows(page)
-    bundles = resolver.parse_search_bundle_rows(page)
-    assert apps == [{"id": 208650, "name": "Batman: Arkham Knight"}]
-    assert bundles == [{"id": 20515, "name": "Batman: Arkham Collection"}]
+# ─── 0.5.0/0.5.1 Steam 捆绑包联动（本地 bundles 语料兜底 + resolve_target 双返回）───
 
 
 def test_pick_bundleid_exact_and_clean():
@@ -203,36 +188,134 @@ def test_pick_bundleid_exact_and_clean():
 
 @pytest.mark.asyncio
 async def test_resolve_target_bundle_fallback(monkeypatch):
-    """app 全链落空、同页 bundle 行 exact 命中 → (None, bundleid)；
-    app 命中优先于早期 bundle 命中。"""
-    from app.domains.metadata import resolver
+    """app 全链落空 → 本地 bundles 语料 exact/clean 兜底 (None, bundleid)；
+    app 命中优先于 bundle 兜底；语料没有的标题 (None, None)。"""
+    from app.domains.metadata import bundle_corpus, resolver
 
-    mixed_page = """
-    <a data-ds-bundleid="20515" href="/bundle/20515/"><span class="title">Batman: Arkham Collection</span></a>
-    <a href="/app/208650/" data-ds-appid="208650"><span class="title">Batman: Arkham Knight</span></a>
-    """
+    corpus = [
+        {"id": 20515, "name": "Batman: Arkham Collection"},
+        {"id": 735408, "name": "Ghostrunner: Complete Edition"},
+    ]
+
+    async def fake_corpus():
+        return corpus
 
     async def no_storesearch(session, term, proxy):
         return []
 
-    async def page_for(session, term, proxy):
-        return mixed_page
+    async def app_hit_storesearch(session, term, proxy):
+        # 词链降档到 "Batman" 才命中本体（storesearch 热门杂讯形态）
+        return [{"id": 208650, "name": "Batman: Arkham Knight"}] if term == "Batman" else []
 
-    monkeypatch.setattr(resolver, "_fetch_storesearch", no_storesearch)
-    monkeypatch.setattr(resolver, "_fetch_search_page_raw", page_for)
+    async def no_page(session, term, proxy):
+        return ""
 
     async def no_sleep(_: float) -> None:
         return None
 
+    monkeypatch.setattr(resolver, "_fetch_storesearch", no_storesearch)
+    monkeypatch.setattr(resolver, "_fetch_search_page_raw", no_page)
     monkeypatch.setattr(resolver.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(bundle_corpus, "load_bundle_corpus", fake_corpus)
 
-    # 条目名 = bundle 名 → app 行（Arkham Knight）五级全不中 → bundle 兜底
+    # 条目名 = 语料实名（exact）→ bundle 兜底
     appid, bundleid = await resolver.resolve_target(None, "Batman: Arkham Collection", None)
     assert appid is None and bundleid == 20515
 
-    # 条目名 = app 名 → app 优先（同页 bundle 行不作干扰）
-    appid2, bundleid2 = await resolver.resolve_target(None, "Batman: Arkham Knight", None)
-    assert appid2 == 208650 and bundleid2 is None
+    # clean 层：条目名与语料名清洗后同形（版本词/标点差异不挡）
+    appid_c, bundleid_c = await resolver.resolve_target(
+        None, "Ghostrunner Complete Edition", None
+    )
+    assert appid_c is None and bundleid_c == 735408
+
+    # 语料没有的标题 → (None, None)
+    appid_x, bundleid_x = await resolver.resolve_target(None, "Unknown Game X", None)
+    assert appid_x is None and bundleid_x is None
+
+    # app 命中优先：storesearch 恢复后 bundle 兜底不再参与
+    monkeypatch.setattr(resolver, "_fetch_storesearch", app_hit_storesearch)
+    appid_a, bundleid_a = await resolver.resolve_target(None, "Batman: Arkham Knight", None)
+    assert appid_a == 208650 and bundleid_a is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_bundle_only_skips_app_chain(monkeypatch):
+    """合辑 SKU 专用入口：语料命中直接回 bundleid；语料落空回 None，
+    全程不碰 storesearch/搜索页（0.4.1 合辑防误判语义保留）。"""
+    from app.domains.metadata import bundle_corpus, resolver
+
+    storesearch_calls: list[str] = []
+    searchpage_calls: list[str] = []
+
+    async def spy_storesearch(session, term, proxy):
+        storesearch_calls.append(term)
+        return [{"id": 208650, "name": "Batman: Arkham Knight"}]
+
+    async def spy_page(session, term, proxy):
+        searchpage_calls.append(term)
+        return ""
+
+    async def fake_corpus():
+        return [{"id": 20515, "name": "Batman: Arkham Collection"}]
+
+    monkeypatch.setattr(resolver, "_fetch_storesearch", spy_storesearch)
+    monkeypatch.setattr(resolver, "_fetch_search_page_raw", spy_page)
+    monkeypatch.setattr(bundle_corpus, "load_bundle_corpus", fake_corpus)
+
+    bid = await resolver.resolve_bundle_only("Batman: Arkham Collection")
+    assert bid == 20515
+    assert storesearch_calls == [] and searchpage_calls == []
+
+
+@pytest.mark.asyncio
+async def test_variant_bundle_guard(monkeypatch):
+    """0.6.0 变体守卫："X - Complete Edition" 经 clean 层错配本体 appid 后，
+    先按全名查捆绑包（语料→app 购买选项），命中改判 bundleid；非变体名
+    零额外请求。"""
+    from app.domains.metadata import bundle_corpus, resolver
+
+    async def base_hit_storesearch(session, term, proxy):
+        return [{"id": 539470, "name": "Police Stories"}]
+
+    async def no_page(session, term, proxy):
+        return ""
+
+    async def empty_corpus():
+        return []
+
+    probe_calls: list[int] = []
+
+    async def fake_options(session, appid, proxy):
+        probe_calls.append(int(appid))
+        return [{"id": 12051, "name": "Police Stories - Complete Edition"}]
+
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(resolver, "_fetch_storesearch", base_hit_storesearch)
+    monkeypatch.setattr(resolver, "_fetch_search_page_raw", no_page)
+    monkeypatch.setattr(bundle_corpus, "load_bundle_corpus", empty_corpus)
+    monkeypatch.setattr(resolver, "_fetch_app_bundle_options", fake_options)
+    monkeypatch.setattr(resolver.asyncio, "sleep", no_sleep)
+
+    # 变体名：clean 层命中本体（normalize 剥 Complete Edition 同形）→ 守卫改判捆绑包
+    appid, bundleid = await resolver.resolve_target(None, "Police Stories - Complete Edition", None)
+    assert appid is None and bundleid == 12051
+    assert probe_calls == [539470]
+
+    # 选项里没有同名捆绑包 → 维持 appid（宁缺勿猜，不误伤真本体）
+    async def no_bundle_options(session, appid, proxy):
+        return [{"id": 35443, "name": "Tactical Top-Down"}]
+
+    monkeypatch.setattr(resolver, "_fetch_app_bundle_options", no_bundle_options)
+    appid2, bundleid2 = await resolver.resolve_target(None, "Police Stories - Complete Edition", None)
+    assert appid2 == 539470 and bundleid2 is None
+
+    # 非变体名（不剥词）→ 守卫零请求直通
+    probe_calls.clear()
+    appid3, bundleid3 = await resolver.resolve_target(None, "Police Stories", None)
+    assert appid3 == 539470 and bundleid3 is None
+    assert probe_calls == []
 
 
 def test_month_page_url_from_machine_name():

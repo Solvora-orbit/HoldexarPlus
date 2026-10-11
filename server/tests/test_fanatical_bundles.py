@@ -74,8 +74,10 @@ def _algolia_hits() -> list[dict]:
             "bundle_tiers": [
                 {"displayTotal": 5, "products": [
                     tier_product("Pool Game One", APP_P1, ["steam"]),
-                    # 合辑 SKU（即使 drm=steam）：直标不烧检索
-                    tier_product("Great Double-Pack", None, ["steam"]),
+                    # 合辑 SKU（即使 drm=steam）：直标不烧检索；slug 供 0.5.1
+                    # 子包详情探查（成员清单/站点 appid）
+                    dict(tier_product("Great Double-Pack", None, ["steam"]),
+                         slug="great-double-pack"),
                 ]},
                 {"displayTotal": 7, "products": []},
             ],
@@ -310,6 +312,18 @@ async def test_bundle_linkage_on_app_miss(monkeypatch):
 
     async def fake_ensure(bundle_id: int) -> bool:
         ensure_calls.append(bundle_id)
+        # 真实 ensure 的副作用对齐：落主档行（刷新尾 0.6.0 自愈环按「主档在库」去重）
+        from app.domains.games.models import Bundle
+
+        async with get_session_factory()() as s:
+            existing = (
+                await s.execute(
+                    select(Bundle).where(Bundle.bundle_id == bundle_id)
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                s.add(Bundle(bundle_id=bundle_id, name=f"bundle-{bundle_id}"))
+                await s.commit()
         return True
 
     _stub_full_chain(monkeypatch)
@@ -338,6 +352,178 @@ async def test_bundle_linkage_on_app_miss(monkeypatch):
     tiers_t = d["tiers"][1]["games"]
     beta = next(g for g in tiers_t if g["title"] == "Beta Game")
     assert beta["bundleId"] == 20515 and beta["appid"] is None
+
+
+@pytest.mark.asyncio
+async def test_combo_sku_bundle_linkage(monkeypatch):
+    """0.5.1 合辑 SKU 联动：不烧 app 检索，本地 bundles 语料命中 →
+    bundle_id 落库 + ensure 入库 + 不再直标 not_found（attempts 置满只在
+    语料未命中时）；未命中条目维持直标。"""
+    ensure_calls: list[int] = []
+    corpus_calls: list[str] = []
+
+    async def fake_corpus():
+        return [{"id": 31629, "name": "Great Double-Pack"}]
+
+    async def fake_ensure(bundle_id: int) -> bool:
+        ensure_calls.append(bundle_id)
+        # 落主档行对齐真实 ensure（刷新尾自愈环按主档在库去重）
+        from app.domains.games.models import Bundle
+
+        async with get_session_factory()() as s:
+            existing = (
+                await s.execute(
+                    select(Bundle).where(Bundle.bundle_id == bundle_id)
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                s.add(Bundle(bundle_id=bundle_id, name=f"bundle-{bundle_id}"))
+                await s.commit()
+        return True
+
+    async def fake_resolve(session, title, proxy):
+        return (None, None)
+
+    async def fake_bundle_only(title: str):
+        corpus_calls.append(title)
+        return 31629 if title == "Great Double-Pack" else None
+
+    _stub_full_chain(monkeypatch)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", fake_resolve)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_bundle_only", fake_bundle_only)
+    monkeypatch.setattr("app.domains.bundles.refresh.ensure_bundle_stored", fake_ensure)
+
+    res = await fnt.refresh_fanatical_bundles()
+    assert res["ok"] is True
+    # 合辑只走 bundle-only 语料通道，不进 app 检索
+    assert "Great Double-Pack" in corpus_calls
+    assert ensure_calls == [31629]
+    async with get_session_factory()() as session:
+        games_p = (
+            await session.execute(
+                select(FanaticalBundleGame).where(FanaticalBundleGame.slug == SLUG_P)
+            )
+        ).scalars().all()
+        by_title = {g.title: g for g in games_p}
+        assert by_title["Great Double-Pack"].appid is None
+        assert by_title["Great Double-Pack"].bundle_id == 31629
+        assert by_title["Great Double-Pack"].resolve_attempts == 0
+
+        d = await fnt.bundle_detail(SLUG_P)
+        assert d is not None
+        pending_p = {p["title"]: p for p in d["pending"]}
+        assert pending_p["Great Double-Pack"]["status"] == "bundle"
+
+
+@pytest.mark.asyncio
+async def test_combo_member_pack_linkage(monkeypatch):
+    """0.5.1 站点合辑 B 类：语料未命中 → 子包详情探查（type=bundle +
+    bundles[].games 成员清单）→ 成员逐个解析落 member_appids_json，
+    载荷五态 'pack'（成员可留未解析，appid=None）。"""
+    async def fake_resolve(session, title, proxy):
+        # 成员解析：House Party 命中本体；Style Pack 查不到（成员可留欠账）
+        return 594590 if title == "House Party" else None
+
+    async def fake_bundle_only(title):
+        return None  # 语料未命中 → 走详情探查
+
+    async def fake_get_json(session, proxy, url, headers):
+        if url.endswith("/api/all/en"):
+            return _all_en()
+        if url.endswith(f"/api/products/{SLUG_T}/en"):
+            return _product_detail()
+        if url.endswith("/api/products/great-double-pack/en"):
+            return {"type": "bundle", "bundles": [{"games": [
+                {"name": "House Party"},
+                {"name": "House Party - Business and Pleasure Style Pack"},
+            ]}]}
+        return None
+
+    _stub_full_chain(monkeypatch)
+    monkeypatch.setattr(fnt, "_get_json", fake_get_json)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", _as_target(fake_resolve))
+    monkeypatch.setattr("app.domains.metadata.service._resolve_bundle_only", fake_bundle_only)
+
+    res = await fnt.refresh_fanatical_bundles()
+    assert res["ok"] is True
+    async with get_session_factory()() as session:
+        games_p = (
+            await session.execute(
+                select(FanaticalBundleGame).where(FanaticalBundleGame.slug == SLUG_P)
+            )
+        ).scalars().all()
+        by_title = {g.title: g for g in games_p}
+        row = by_title["Great Double-Pack"]
+        assert row.appid is None and row.bundle_id is None
+        assert json.loads(row.member_appids_json) == [
+            {"title": "House Party", "appid": 594590},
+            {"title": "House Party - Business and Pleasure Style Pack", "appid": None},
+        ]
+        assert row.resolve_attempts == 0  # 有结论不算失败
+
+        d = await fnt.bundle_detail(SLUG_P)
+        assert d is not None
+        pending_p = {p["title"]: p for p in d["pending"]}
+        assert pending_p["Great Double-Pack"]["status"] == "pack"
+        assert pending_p["Great Double-Pack"]["memberAppids"] == [
+            {"title": "House Party", "appid": 594590},
+            {"title": "House Party - Business and Pleasure Style Pack", "appid": None},
+        ]
+
+    # 成员卡片集载荷（0.6.0）：Game 目录有行的成员出卡（封面/价格数据源）
+    from app.domains.games.models import Game
+
+    async with get_session_factory()() as session:
+        if await session.get(Game, 594590) is None:
+            session.add(Game(appid=594590, name="House Party"))
+            await session.commit()
+    d = await fnt.bundle_detail(SLUG_P)
+    assert d is not None
+    assert [c["appid"] for c in d["memberItems"]] == [594590]
+    async with get_session_factory()() as session:
+        row = await session.get(Game, 594590)
+        if row is not None:
+            await session.delete(row)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_combo_site_appid_direct(monkeypatch):
+    """0.5.1 站点合辑 A 类：详情 type=game + steam.id 满位 → 站点权威
+    appid 直取（Algolia 层 steamId 空串不再等于非 Steam）。"""
+    async def fake_resolve(session, title, proxy):
+        return None
+
+    async def fake_bundle_only(title):
+        return None
+
+    async def fake_get_json(session, proxy, url, headers):
+        if url.endswith("/api/all/en"):
+            return _all_en()
+        if url.endswith(f"/api/products/{SLUG_T}/en"):
+            return _product_detail()
+        if url.endswith("/api/products/great-double-pack/en"):
+            return {"type": "game", "steam": {"type": "app", "id": APP_P1}}
+        return None
+
+    _stub_full_chain(monkeypatch)
+    monkeypatch.setattr(fnt, "_get_json", fake_get_json)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", _as_target(fake_resolve))
+    monkeypatch.setattr("app.domains.metadata.service._resolve_bundle_only", fake_bundle_only)
+
+    res = await fnt.refresh_fanatical_bundles()
+    assert res["ok"] is True
+    async with get_session_factory()() as session:
+        games_p = (
+            await session.execute(
+                select(FanaticalBundleGame).where(FanaticalBundleGame.slug == SLUG_P)
+            )
+        ).scalars().all()
+        by_title = {g.title: g for g in games_p}
+        row = by_title["Great Double-Pack"]
+        assert row.appid == APP_P1
+        assert row.member_appids_json is None
+        assert row.resolve_attempts == 0
 
 
 @pytest.mark.asyncio
@@ -461,3 +647,72 @@ async def test_ingest_scan_skips_existing(monkeypatch):
         await s.commit()
     res2 = await fnt.scan_missing_ingest()
     assert res2["queued"] == 0
+
+
+# ─── 单包删数据 + 重抓（0.5.1）─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_reset_bundle_clears_and_refetches(monkeypatch):
+    """reset_bundle：条目/档位清空 → 后台单包重建（Algolia 命中 → 价格 →
+    档位 → 条目，与全量刷新同链）；acked_at 保留。"""
+    import asyncio as _a
+    from datetime import datetime
+
+    async def fake_run(specs, **_):
+        return []
+
+    _stub_full_chain(monkeypatch)
+    monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run)
+    now_dt = datetime(2026, 10, 11, 12, 0, 0)
+    async with get_session_factory()() as s:
+        s.add(FanaticalBundle(
+            slug=SLUG_T, kind="tiered", name="Test Tiered Bundle", image="",
+            url=f"{fnt._FANATICAL_BASE}/en/bundle/{SLUG_T}", on_sale=True,
+            game_count=1, acked_at=now_dt, first_seen_at=now_dt, last_seen_at=now_dt,
+            tiers_json='[{"id": "stale", "price": {"USD": 1}, "header": "", "titles": ["Stale"]}]',
+        ))
+        s.add(FanaticalBundleGame(slug=SLUG_T, appid=999999, title="Stale"))
+        await s.commit()
+
+    res = await fnt.reset_bundle(SLUG_T)
+    assert res["ok"] is True
+    async with get_session_factory()() as s:
+        assert (
+            await s.execute(
+                select(FanaticalBundleGame).where(FanaticalBundleGame.slug == SLUG_T)
+            )
+        ).scalars().all() == []
+        b = await s.get(FanaticalBundle, SLUG_T)
+        assert b.tiers_json is None and b.game_count == 0
+
+    others = [t for t in _a.all_tasks() if t is not _a.current_task()]
+    await _a.gather(*others)
+
+    async with get_session_factory()() as s:
+        b = await s.get(FanaticalBundle, SLUG_T)
+        assert b is not None and b.tiers_json and "stale" not in b.tiers_json
+        assert b.acked_at is not None
+        games = (
+            await s.execute(
+                select(FanaticalBundleGame).where(FanaticalBundleGame.slug == SLUG_T)
+            )
+        ).scalars().all()
+        by_title = {g.title: g for g in games}
+        assert by_title["Alpha Game"].appid == APP_T1
+        assert b.game_count == len(games)
+
+
+@pytest.mark.asyncio
+async def test_reset_bundle_unknown_and_locked(monkeypatch):
+    """未知 slug 报「包不存在」；全量刷新持锁时拒绝（避免交错）。"""
+    import asyncio as _a
+
+    res = await fnt.reset_bundle("fantest-nonexistent")
+    assert res["ok"] is False and "不存在" in res["error"]
+
+    lock = _a.Lock()
+    await lock.acquire()
+    monkeypatch.setattr(fnt, "_REFRESH_LOCK", lock)
+    res2 = await fnt.reset_bundle(SLUG_T)
+    assert res2["ok"] is False and "刷新" in res2["error"]

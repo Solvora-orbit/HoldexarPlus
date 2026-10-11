@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import aiohttp
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 
 from app.core.database import WritePriority, get_session_factory, write_gate
 from app.domains.fanatical.models import FanaticalBundle, FanaticalBundleGame
@@ -430,15 +430,39 @@ async def _sync_bundle_games(
     steamId，实测 Saint Kotar/Dreamscaper 等全是 drm:["steam"] + 空串 id），
     走统一检索引擎兜底（attempts 记账，与 HB/GMG 同账本）；drm 不含 steam
     = 确知非 Steam，直置满；合辑 SKU（Double/Triple Pack、A + B、Pack/
-    Bundle/Collection 收尾）无单 app 对应，直置满不烧检索。
-    0.5.0：检索兜底改 `resolve_target`（app 落空时 bundle 兜底），命中
-    bundle → 复用 bundles 域入库 + 条目落 bundle_id（抽屉按捆绑包卡展示）。
+    Bundle/Collection 收尾）无单 app 对应，不烧 app 检索，走四档联动链
+    （0.5.1）：① 本地 bundles 语料 exact/clean → ② 子包详情站点权威
+    steam.id 直取 → ③ 子包详情 bundles[].games 成员清单逐个解析（站点明示
+    包内有什么，实测 30/30 合辑 SKU 两类之一）→ ④ 全落空维持直标 not_found。
+    检索兜底走 `resolve_target`（app 落空时 bundle 兜底），命中
+    bundle → 复用 bundles 域入库 + 条目落 bundle_id（抽屉按捆绑包卡展示）；
+    成员解析结果落 member_appids_json（抽屉按站点合辑卡展示）。
     返回条目数。"""
     from app.domains.metadata import service as metadata_service
 
     titles = list(dict.fromkeys(
         t for tier in row["tiers"] for t in tier["titles"]
     ))
+    # 已有结论的条目（appid/bundle/成员清单）本轮不再重解（省检索额度；
+    # 0.4.1 起兜底链在，此为幂等护栏——注释语义与实现对齐）
+    async with get_session_factory()() as s:
+        known_rows = (
+            await s.execute(
+                select(
+                    FanaticalBundleGame.title, FanaticalBundleGame.appid,
+                    FanaticalBundleGame.bundle_id,
+                    FanaticalBundleGame.member_appids_json,
+                    FanaticalBundleGame.resolve_attempts,
+                ).where(FanaticalBundleGame.slug == bundle_slug)
+            )
+        ).all()
+    appid_known = {t for t, a, _b, _m, _n in known_rows if a is not None}
+    bundle_known = {t for t, _a, b, _m, _n in known_rows if b is not None}
+    packed_known = {t for t, _a, _b, m, _n in known_rows if m}
+    exhausted = {
+        t for t, _a, _b, _m, n in known_rows
+        if int(n or 0) >= RESOLVE_MAX_ATTEMPTS
+    }
     # 名称 → (直取 appid | 是否 Steam 发行)；drm 是列表（如 ["steam"]）
     steam_map: dict[str, int | None] = {name: None for name in titles}
     on_steam: dict[str, bool] = {name: False for name in titles}
@@ -453,13 +477,16 @@ async def _sync_bundle_games(
         drm = p.get("drm") or []
         on_steam[name] = isinstance(drm, list) and "steam" in [str(d).lower() for d in drm]
 
-    # 需要检索兜底的标题：无直取 appid、站点表明是 Steam 商品、非合辑 SKU
+    # 需要检索兜底的标题：无直取 appid、站点表明是 Steam 商品、非合辑 SKU、
+    # 尚无结论且未达尝试上限
     to_resolve = [
         t for t in titles
         if steam_map.get(t) is None and on_steam.get(t) and not is_combo_sku(t)
+        and t not in appid_known and t not in bundle_known and t not in exhausted
     ]
     resolved: dict[str, int] = {}
     resolved_bundle: dict[str, int] = {}
+    resolved_pack: dict[str, list[dict]] = {}
     for title in to_resolve:
         appid, bundleid = await metadata_service._resolve_target(session, title, proxy)
         if appid is not None:
@@ -468,24 +495,91 @@ async def _sync_bundle_games(
             resolved_bundle[title] = bundleid
         await asyncio.sleep(0.3)
 
+    # 合辑 SKU 四档联动链（不烧 app 检索；已 bundling/已展开/已直取的跳过）
+    combo_titles = [
+        t for t in titles
+        if steam_map.get(t) is None and is_combo_sku(t)
+        and t not in appid_known and t not in bundle_known and t not in packed_known
+    ]
+    slug_by_title = {
+        str(p.get("name") or "").strip(): str(p.get("slug") or "").strip()
+        for p in row.get("steam_products") or [] if p.get("name") and p.get("slug")
+    }
+    for title in combo_titles:
+        # ① 本地 bundles 语料 exact/clean（合辑名走 app 五级必错对首成员）
+        bid = await metadata_service._resolve_bundle_only(title)
+        if bid is not None:
+            resolved_bundle[title] = bid
+            await asyncio.sleep(0.2)
+            continue
+        # ②③ 子包详情探查（站点自身写明的内容；1 req/s 限速）
+        sub_slug = slug_by_title.get(title)
+        if not sub_slug:
+            continue
+        detail = await _get_json(
+            session, proxy, _PRODUCT_API.format(slug=sub_slug),
+            _api_headers(_FANATICAL_BASE + "/en/bundle/games"),
+        )
+        await asyncio.sleep(0.5)
+        if not isinstance(detail, dict):
+            continue  # 详情拿不到 → 维持直标 not_found
+        sid = (detail.get("steam") or {}).get("id")
+        if detail.get("type") == "game" and isinstance(sid, int) and sid > 0:
+            resolved[title] = sid  # ② 站点权威 appid 直取
+            continue
+        members: list[str] = []
+        for b in detail.get("bundles") or []:
+            for g in (b or {}).get("games") or []:
+                name = str((g or {}).get("name") or "").strip()
+                if name and name not in members:
+                    members.append(name)
+        if detail.get("type") != "bundle" or not members:
+            continue
+        # ③ 成员清单逐个解析（成员 = 真实游戏/DLC，标题可检索；未解析留 None）
+        packed: list[dict] = []
+        for m in members:
+            m_appid, _m_bundle = await metadata_service._resolve_target(session, m, proxy)
+            packed.append({"title": m, "appid": m_appid})
+            await asyncio.sleep(0.3)
+        resolved_pack[title] = packed
+
+    # bundle 命中入库（0.6.0 根修 database is locked）：ensure_bundle_stored
+    # 自带写闸并**另开一条连接**写 bundles 主档——必须放在外层写事务之前。
+    # 嵌在闸内时同任务重入放行，但外层 session 未提交的 WAL 写锁与这条新连接
+    # 互等（外层又在 await 它），busy_timeout 60s 到点即抛锁错（proxypool
+    # health 的「网络与落库分离」同型范式）；引用落库仍留在下方闸内单事务。
+    for bid in dict.fromkeys(resolved_bundle.values()):
+        try:
+            from app.domains.bundles import refresh as bundles_refresh
+
+            await bundles_refresh.ensure_bundle_stored(bid)
+        except Exception:  # noqa: BLE001
+            logger.exception("[fanatical-bundles] bundle %d 联动入库异常", bid)
+
     async with write_gate(WritePriority.BACKGROUND, label="fanatical_games"), \
             get_session_factory()() as s:
         existing = {
-            t: a for t, a in await s.execute(
-                select(FanaticalBundleGame.title, FanaticalBundleGame.appid)
+            t: (a, m) for t, a, m in await s.execute(
+                select(
+                    FanaticalBundleGame.title, FanaticalBundleGame.appid,
+                    FanaticalBundleGame.member_appids_json,
+                )
                 .where(FanaticalBundleGame.slug == bundle_slug)
             )
         }
         for title in titles:
             direct = steam_map.get(title)
             appid = direct or resolved.get(title) or None
-            # 直标 not_found 仅限：确知非 Steam / 合辑 SKU（检索兜底失败的
-            # 走 attempts 账本自然到顶，不在此置满）
+            # 直标 not_found 仅限：确知非 Steam / 合辑 SKU 且四档联动全落空
+            # （检索兜底失败的走 attempts 账本自然到顶，不在此置满）
             known_missing = steam_map.get(title) is None and (
-                not on_steam.get(title) or is_combo_sku(title)
+                not on_steam.get(title)
+                or (is_combo_sku(title) and title not in resolved_bundle
+                    and title not in resolved_pack and title not in resolved)
             )
             if title in existing:
-                if existing[title] is None and appid is not None:
+                old_appid, old_members = existing[title]
+                if old_appid is None and appid is not None:
                     await s.execute(
                         update(FanaticalBundleGame)
                         .where(FanaticalBundleGame.slug == bundle_slug,
@@ -504,10 +598,15 @@ async def _sync_bundle_games(
             else:
                 s.add(FanaticalBundleGame(
                     slug=bundle_slug, appid=appid, title=title,
+                    member_appids_json=(
+                        json.dumps(resolved_pack[title], ensure_ascii=False)
+                        if title in resolved_pack else None
+                    ),
                     resolve_attempts=(
                         0 if appid is not None
                         else RESOLVE_MAX_ATTEMPTS if known_missing
                         else 0 if title in resolved_bundle  # bundle 命中不算失败
+                        else 0 if title in resolved_pack  # 成员清单落库同样有结论
                         else 1 if title in to_resolve
                         else 0
                     ),
@@ -524,20 +623,24 @@ async def _sync_bundle_games(
                            FanaticalBundleGame.appid.is_(None))
                     .values(resolve_attempts=FanaticalBundleGame.resolve_attempts + 1)
                 )
-        # bundle 命中：复用 bundles 域入库（不挂 monitoring track）+ 落引用
+        # bundle 命中：落引用（主档入库已在闸外 ensure 完成；ensure 失败
+        # 也照落——bundle_known 不再重解，刷新尾 heal_bundle_refs 补抓主档）
         for title, bid in resolved_bundle.items():
-            try:
-                from app.domains.bundles import refresh as bundles_refresh
-
-                await bundles_refresh.ensure_bundle_stored(bid)
-            except Exception:  # noqa: BLE001
-                logger.exception("[fanatical-bundles] bundle %d 联动入库异常", bid)
             await s.execute(
                 update(FanaticalBundleGame)
                 .where(FanaticalBundleGame.slug == bundle_slug,
                        FanaticalBundleGame.title == title,
                        FanaticalBundleGame.appid.is_(None))
                 .values(bundle_id=bid)
+            )
+        # 成员清单落库（0.5.1）：既有行补 member_appids_json（不覆盖已有 appid）
+        for title, packed in resolved_pack.items():
+            await s.execute(
+                update(FanaticalBundleGame)
+                .where(FanaticalBundleGame.slug == bundle_slug,
+                       FanaticalBundleGame.title == title,
+                       FanaticalBundleGame.appid.is_(None))
+                .values(member_appids_json=json.dumps(packed, ensure_ascii=False))
             )
         count_sq = (
             select(func.count())
@@ -557,6 +660,24 @@ async def _sync_bundle_games(
 
 _REFRESH_LOCK = asyncio.Lock()
 _refresh_task: asyncio.Task | None = None
+
+
+async def _heal_bundle_refs() -> None:
+    """联动悬空引用自愈（0.6.0）：条目带 bundle_id 但包主档缺失（ensure
+    偶发失败=瞬时写锁/网络抖动）→ 补抓。bundle_known 使这类条目不再进 sync，
+    不补就永远缺主档（捆绑包卡无价无图）。"""
+    from app.domains.bundles.refresh import heal_bundle_refs
+
+    async with get_session_factory()() as s:
+        refs = (
+            await s.execute(
+                select(FanaticalBundleGame.bundle_id)
+                .where(FanaticalBundleGame.bundle_id.is_not(None))
+            )
+        ).scalars().all()
+    healed = await heal_bundle_refs([int(r) for r in refs])
+    if healed:
+        logger.info("[fanatical-bundles] 联动悬空引用补抓 %d 个", healed)
 
 
 async def refresh_fanatical_bundles() -> dict:
@@ -610,6 +731,7 @@ async def refresh_fanatical_bundles() -> dict:
         # 刷新尾跑一轮收录扫描（与 humble 同构）：本轮解析出的未入目录 appid
         # 批量登记首爬；收录链独立于抓取，调度器另有每日一拍
         ingest = await scan_missing_ingest()
+        await _heal_bundle_refs()
         logger.info("[fanatical-bundles] 刷新完成：列表 %d 包（条目 %d，收录 %d）",
                     len(rows), synced, ingest.get("queued", 0))
         return {"ok": True, "listed": len(rows), "items": synced, "ingest": ingest}
@@ -622,6 +744,79 @@ async def start_refresh() -> dict:
         return {"ok": True, "started": False, "running": True}
     _refresh_task = asyncio.create_task(refresh_fanatical_bundles())
     return {"ok": True, "started": True, "running": True}
+
+
+_reset_task: asyncio.Task | None = None
+
+
+async def reset_bundle(slug: str) -> dict:
+    """单包删数据 + 重抓（0.5.1）：条目行/档位清零 → 后台单包重抓。
+
+    包主档保留（slug/名称/链接/封面 = 列表级元数据）；acked_at 保留（重抓
+    不复活 NEW 徽章）。重抓串行于 _REFRESH_LOCK；站点已下架/Algolia 无命中
+    时数据保持清空（如实反馈，等下一轮列表刷新裁定去留）。"""
+    global _reset_task
+    if _REFRESH_LOCK.locked():
+        return {"ok": False, "error": "已有 Fanatical 捆绑包刷新在进行"}
+    if _reset_task is not None and not _reset_task.done():
+        return {"ok": False, "error": "已有 Fanatical 单包重抓在进行"}
+    async with write_gate(WritePriority.BACKGROUND, label="fanatical_reset"), \
+            get_session_factory()() as s:
+        bundle = await s.get(FanaticalBundle, slug)
+        if bundle is None:
+            return {"ok": False, "error": "包不存在"}
+        await s.execute(
+            delete(FanaticalBundleGame).where(FanaticalBundleGame.slug == slug)
+        )
+        await s.execute(
+            update(FanaticalBundle).where(FanaticalBundle.slug == slug)
+            .values(tiers_json=None, game_count=0)
+        )
+        await s.commit()
+    # 强引用登记（防 GC 静默回收，同 HB 0.6.0 修）
+    _reset_task = asyncio.create_task(_reset_refetch(slug))
+    return {"ok": True, "started": True}
+
+
+async def _reset_refetch(slug: str) -> None:
+    """单包重抓后台任务：Algolia 单包命中 → 价格 + 档位 + 条目重建
+    （与全量刷新同链同语义，成员清单联动含在内）；尾跑一轮收录扫描。"""
+    if _REFRESH_LOCK.locked():
+        logger.info("[fanatical-bundles] 单包重抓跳过（全量刷新进行中，会顺带重建）: %s", slug)
+        return
+    async with _REFRESH_LOCK:
+        proxy = await _strategy_proxy()
+        connector = aiohttp.TCPConnector(limit=4, ttl_dns_cache=60)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            page = await _get_text(session, proxy, _FANATICAL_BASE + _PAGE_PATH, _page_headers())
+            key = extract_search_key(page or "")
+            if not key:
+                logger.warning("[fanatical-bundles] 单包重抓失败（searchKey 提取）: %s", slug)
+                return
+            rows = parse_hits(await _algolia_query(session, proxy, key))
+            row = next((r for r in rows if r["slug"] == slug), None)
+            if row is None:
+                logger.info("[fanatical-bundles] 单包重抓：站点已不在售，保持清空: %s", slug)
+                return
+            pick_prices = parse_pick_prices(
+                await _get_json(session, proxy, _FANATICAL_BASE + _ALL_PATH, _page_headers())
+                or {}
+            )
+            prices = await _tier_prices_for(session, proxy, row, pick_prices)
+            tiers = merge_tiers(row, prices)
+            now = datetime.utcnow()
+            if tiers:
+                async with write_gate(WritePriority.BACKGROUND, label="fanatical_reset_tiers"), \
+                        get_session_factory()() as s:
+                    await s.execute(
+                        update(FanaticalBundle).where(FanaticalBundle.slug == slug)
+                        .values(tiers_json=json.dumps(tiers, ensure_ascii=False), updated_at=now)
+                    )
+                    await s.commit()
+            await _sync_bundle_games(session, proxy, slug, row)
+        ingest = await scan_missing_ingest()
+        await _heal_bundle_refs()
+        logger.info("[fanatical-bundles] 单包重抓完成: %s（收录 %d）", slug, ingest.get("queued", 0))
 
 
 # ── 收录链（与 humble 域同型：appid 已解析、目录缺行 → 批量首爬）──
@@ -654,7 +849,6 @@ async def _queue_ingest(appids: list[int], source: str) -> int:
 
 async def _ingest_candidates() -> list[int]:
     from app.domains.games.models import Game
-
     async with get_session_factory()() as s:
         rows = (
             await s.execute(
@@ -672,6 +866,29 @@ async def _ingest_candidates() -> list[int]:
             cur = freshness.get(a)
             if seen_at is not None and (cur is None or seen_at > cur):
                 freshness[a] = seen_at
+        # 0.6.0：站点合辑展开出的成员 appid 同样入候选（成员有真身条目，
+        # 不进目录就永远没卡片——抽屉合辑行的价格/封面全依赖这个）
+        pack_rows = (
+            await s.execute(
+                select(FanaticalBundleGame.member_appids_json, FanaticalBundle.first_seen_at)
+                .join(FanaticalBundle, FanaticalBundle.slug == FanaticalBundleGame.slug)
+                .where(
+                    FanaticalBundle.on_sale.is_(True),
+                    FanaticalBundleGame.member_appids_json.is_not(None),
+                )
+            )
+        ).all()
+        for raw, seen_at in pack_rows:
+            try:
+                parsed = json.loads(raw)
+            except (ValueError, TypeError):
+                continue
+            for m in parsed if isinstance(parsed, list) else []:
+                a = m.get("appid") if isinstance(m, dict) else None
+                if isinstance(a, int) and a > 0:
+                    cur = freshness.get(a)
+                    if cur is None or (seen_at is not None and seen_at > cur):
+                        freshness[a] = seen_at
         appids = list(freshness)
         have: set[int] = set()
         if appids:
@@ -783,7 +1000,7 @@ async def mark_seen(slug: str) -> bool:
 
 
 async def bundle_detail(slug: str) -> dict | None:
-    """单包详情：包信息 + 包内游戏（pending 三态）+ 档位。
+    """单包详情：包信息 + 包内游戏（pending 五态）+ 档位。
 
     档位语义随 kind：
     - tiered：档间**独立集合**（非 HB 式累进）——games = 该档全部条目，
@@ -801,10 +1018,11 @@ async def bundle_detail(slug: str) -> dict | None:
                 select(
                     FanaticalBundleGame.appid, FanaticalBundleGame.title,
                     FanaticalBundleGame.resolve_attempts, FanaticalBundleGame.bundle_id,
+                    FanaticalBundleGame.member_appids_json,
                 ).where(FanaticalBundleGame.slug == slug)
             )
         ).all()
-        appids = [int(a) for a, _t, _n, _b in rows if a is not None]
+        appids = [int(a) for a, _t, _n, _b, _m in rows if a is not None]
         have: set[int] = set()
         if appids:
             have = {
@@ -812,27 +1030,50 @@ async def bundle_detail(slug: str) -> dict | None:
                     select(Game.appid).where(Game.appid.in_(appids))
                 )
             }
+    # 站点合辑成员清单（0.5.1）：JSON 失败/为空一律回 None（宁缺勿猜）
+
+    def _members(raw: str | None) -> list[dict] | None:
+        if not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(parsed, list) or not parsed:
+            return None
+        return [
+            {"title": str(m.get("title") or ""), "appid": m.get("appid")}
+            for m in parsed if isinstance(m, dict) and m.get("title")
+        ] or None
+
     pending = [
         {
             "appid": int(a) if a is not None else None, "title": title,
             "bundleId": int(b) if b is not None else None,
+            "memberAppids": _members(m),
+            # 五态（0.5.1）：bundle > pack（站点合辑成员展开）> not_found >
+            # ingesting > resolving
             "status": (
                 "bundle"
                 if a is None and b is not None
+                else "pack"
+                if a is None and b is None and _members(m) is not None
                 else "not_found"
                 if a is None and int(n or 0) >= RESOLVE_MAX_ATTEMPTS
                 else "ingesting" if a is not None and int(a) not in have
                 else "resolving"
             ),
         }
-        for a, title, n, b in rows
+        for a, title, n, b, m in rows
         if a is None or int(a) not in have
     ]
     title_appid: dict[str, int | None] = {}
     title_bundle: dict[str, int | None] = {}
-    for a, title, _n, b in rows:
+    title_members: dict[str, list[dict] | None] = {}
+    for a, title, _n, b, m in rows:
         title_appid.setdefault(title, int(a) if a is not None else None)
         title_bundle.setdefault(title, int(b) if b is not None else None)
+        title_members.setdefault(title, _members(m))
 
     tiers_out: list[dict] = []
     if bundle.tiers_json:
@@ -850,6 +1091,7 @@ async def bundle_detail(slug: str) -> dict | None:
         # pick 的池子 = 全部条目（games 表行）；tiered 的档内容 = tiers_json titles
         pool_games = [
             {"title": x, "appid": a, "bundleId": title_bundle.get(x),
+             "memberAppids": title_members.get(x),
              "isNew": False, "unlockPriceMap": pool_min_price}
             for x, a in title_appid.items()
         ]
@@ -864,7 +1106,8 @@ async def bundle_detail(slug: str) -> dict | None:
                 titles = [x for x in (t.get("titles") or []) if isinstance(x, str)]
                 games = [
                     {"title": x, "appid": title_appid.get(x),
-                     "bundleId": title_bundle.get(x), "isNew": False,
+                     "bundleId": title_bundle.get(x),
+                     "memberAppids": title_members.get(x), "isNew": False,
                      "unlockPriceMap": price}
                     for x in titles
                 ]
@@ -888,6 +1131,21 @@ async def bundle_detail(slug: str) -> dict | None:
         "gameCount": len(rows),
         "items": [], "total": 0, "pending": pending, "tiers": tiers_out,
     }
+    # 0.6.0：合辑成员卡片集（成员 appid 非顶层条目、不在 items 里；
+    # 抽屉合辑行的封面/国区价按 memberAppids.appid 从这里查）
+    member_ids = sorted({
+        int(m["appid"])
+        for p in pending
+        for m in (p.get("memberAppids") or [])
+        if isinstance(m.get("appid"), int) and m["appid"] > 0
+    })
+    if member_ids:
+        try:
+            member_cards = await games_service.list_items_by_appids(member_ids)
+            payload["memberItems"] = member_cards["items"]
+        except Exception:  # noqa: BLE001 —— 成员卡查失败不阻断详情
+            logger.exception("[fanatical-bundles] 成员卡片查询失败")
+            payload["memberItems"] = []
     if appids:
         cards = await games_service.list_items_by_appids(appids)
         payload["items"] = cards["items"]

@@ -1559,12 +1559,19 @@ export interface HumbleBundlesPayload {
 
 /** 详情抽屉里的非卡片条目（resolving=解析欠账，ingesting=目录收录中，
  *  not_found=关联尝试已放弃（0.3.2，大概率非 Steam 发行），
- *  bundle=按 Steam 捆绑包联动（0.5.0，bundleId 指向 bundles 域）） */
+ *  bundle=按 Steam 捆绑包联动（0.5.0，bundleId 指向 bundles 域），
+ *  pack=站点合辑成员展开（0.5.1，memberAppids 为站点明示的包内成员）） */
+export interface PackMember {
+  title: string
+  appid: number | null
+}
+
 export interface HumblePendingGame {
   appid: number | null
   title: string
   bundleId?: number | null
-  status: 'resolving' | 'ingesting' | 'not_found' | 'bundle'
+  memberAppids?: PackMember[] | null
+  status: 'resolving' | 'ingesting' | 'not_found' | 'bundle' | 'pack'
 }
 
 /** 档位内游戏条目；isNew = 本档新增，unlockPriceCnyFen = 首次出现的档位价
@@ -1573,6 +1580,7 @@ export interface HumbleTierGame {
   title: string
   appid: number | null
   bundleId?: number | null
+  memberAppids?: PackMember[] | null
   isNew?: boolean
   unlockPriceCnyFen?: number | null
 }
@@ -1605,6 +1613,10 @@ export const humbleApi = {
   /** 点开包 = 已读（清 NEW 徽章，幂等） */
   seen: (slug: string) =>
     request<{ ok: boolean }>('POST', `/humble/bundles/${encodeURIComponent(slug)}/seen`),
+  /** 单包删数据 + 重抓（0.5.1，后台任务立即返回；刷新进行中 409） */
+  reset: (slug: string) =>
+    request<{ ok: boolean; started: boolean }>(
+      'POST', `/humble/bundles/${encodeURIComponent(slug)}/reset`),
   /** 启动一轮刷新（后台任务立即返回；running 轮询 bundles 端点） */
   refresh: () => request<{ ok: boolean; started: boolean; running: boolean }>('POST', '/humble/refresh'),
   /** 立即跑一轮目录收录（0.2.3；ingestRunning/ingestPending 轮询收尾） */
@@ -1619,11 +1631,13 @@ export const humbleApi = {
 export type PriceMap = Record<string, number>
 
 /** 档位内游戏条目（unlockPriceMap：tiered=该档价 / pick=最低档价 /
- *  HB·GMG 累进=首现档价）；bundleId = Steam 捆绑包联动（0.5.0） */
+ *  HB·GMG 累进=首现档价）；bundleId = Steam 捆绑包联动（0.5.0）；
+ *  memberAppids = 站点合辑成员清单（0.5.1，Fanatical 合辑 SKU） */
 export interface StoreTierGame {
   title: string
   appid: number | null
   bundleId?: number | null
+  memberAppids?: PackMember[] | null
   isNew?: boolean
   unlockPriceMap?: PriceMap | null
 }
@@ -1671,6 +1685,8 @@ export interface StoreBundleDetailPayload extends Omit<StoreBundleItem, 'isNew'>
   /** 三态与 HB 同构（resolving/ingesting/not_found） */
   pending: HumblePendingGame[]
   tiers: StoreTier[]
+  /** 站点合辑成员卡片集（0.6.0，Fanatical：合辑行的封面/价格按 appid 查此） */
+  memberItems?: GameListItem[]
 }
 
 function storeBundleApi(prefix: string) {
@@ -1683,6 +1699,10 @@ function storeBundleApi(prefix: string) {
     /** 点开包 = 已读（清 NEW 徽章，幂等） */
     seen: (slug: string) =>
       request<{ ok: boolean }>('POST', `/${prefix}/bundles/${encodeURIComponent(slug)}/seen`),
+    /** 单包删数据 + 重抓（0.5.1，后台任务立即返回；刷新进行中 409） */
+    reset: (slug: string) =>
+      request<{ ok: boolean; started: boolean }>(
+        'POST', `/${prefix}/bundles/${encodeURIComponent(slug)}/reset`),
     /** 启动一轮刷新（后台任务立即返回；running 轮询 bundles 端点） */
     refresh: () => request<{ ok: boolean; started: boolean; running: boolean }>('POST', `/${prefix}/refresh`),
     /** 立即跑一轮目录收录（ingestRunning/ingestPending 轮询收尾） */

@@ -683,3 +683,93 @@ async def test_scan_ingest_occupied_breaks_loop(monkeypatch):
     res = await humble.scan_missing_ingest()
     assert res["queued"] == 0 and res["batches"] == 0 and res["remaining"] == 2
     assert len(calls) == 1, "占用后不得继续排批空转"
+
+
+# ─── 单包删数据 + 重抓（0.5.1）─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_reset_bundle_clears_and_refetches(monkeypatch):
+    """reset_bundle：条目/档位/价格清空 → 后台单包重建（与刷新同链）；
+    acked_at 保留（不复活 NEW）。"""
+    import asyncio as _a
+    from datetime import datetime
+
+    monkeypatch.setattr(humble, "_REFRESH_LOCK", _a.Lock())
+
+    async def fake_page(session, proxy, url):
+        return _detail_html("Alpha Pack")
+
+    async def fake_resolve(session, title, proxy):
+        return APP_A1
+
+    async def fake_proxy():
+        return None
+
+    async def no_sleep(_: float) -> None:
+        return None
+
+    async def fake_run(specs, **_):
+        return []
+
+    monkeypatch.setattr(humble, "_fetch_page", fake_page)
+    monkeypatch.setattr("app.domains.metadata.service._resolve_target", _as_target(fake_resolve))
+    monkeypatch.setattr("app.domains.crawl.service.run_sequential", fake_run)
+    monkeypatch.setattr(humble, "_strategy_proxy", fake_proxy)
+    monkeypatch.setattr(humble.asyncio, "sleep", no_sleep)
+
+    now_dt = datetime(2026, 10, 11, 12, 0, 0)
+    async with get_session_factory()() as session:
+        session.add(HumbleBundle(
+            slug=SLUG_A, name="Alpha Pack", url=f"https://www.humblebundle.com/games/{SLUG_A}",
+            on_sale=True, game_count=1, acked_at=now_dt,
+            first_seen_at=now_dt, last_seen_at=now_dt,
+            price_cny_fen=100,
+            tiers_json='[{"id": "stale", "price_cny_fen": 1, "header": "", "titles": ["Stale"]}]',
+        ))
+        session.add(HumbleBundleGame(slug=SLUG_A, appid=999999, title="Stale"))
+        await session.commit()
+
+    res = await humble.reset_bundle(SLUG_A)
+    assert res["ok"] is True
+    # 清空即时生效（重抓在后台任务里）
+    async with get_session_factory()() as session:
+        assert (
+            await session.execute(
+                select(HumbleBundleGame).where(HumbleBundleGame.slug == SLUG_A)
+            )
+        ).scalars().all() == []
+        a = await session.get(HumbleBundle, SLUG_A)
+        assert a.tiers_json is None and a.price_cny_fen is None and a.game_count == 0
+
+    # 收干后台重抓任务（sleep 已桩为 no-op，任务单步即完）
+    others = [t for t in _a.all_tasks() if t is not _a.current_task()]
+    await _a.gather(*others)
+
+    async with get_session_factory()() as session:
+        a = await session.get(HumbleBundle, SLUG_A)
+        assert a is not None and a.price_cny_fen == 3353
+        assert a.tiers_json and "initial" in a.tiers_json and "stale" not in a.tiers_json
+        games = (
+            await session.execute(
+                select(HumbleBundleGame).where(HumbleBundleGame.slug == SLUG_A)
+            )
+        ).scalars().all()
+        assert len(games) == 1 and games[0].appid == APP_A1
+        # acked_at 保留：重抓不复活 NEW 徽章
+        assert a.acked_at is not None
+
+
+@pytest.mark.asyncio
+async def test_reset_bundle_unknown_and_locked(monkeypatch):
+    """未知 slug 报「包不存在」；全量刷新持锁时拒绝（避免与刷新交错）。"""
+    import asyncio as _a
+
+    res = await humble.reset_bundle("hbtest-nonexistent")
+    assert res["ok"] is False and "不存在" in res["error"]
+
+    lock = _a.Lock()
+    await lock.acquire()
+    monkeypatch.setattr(humble, "_REFRESH_LOCK", lock)
+    res2 = await humble.reset_bundle(SLUG_A)
+    assert res2["ok"] is False and "刷新" in res2["error"]

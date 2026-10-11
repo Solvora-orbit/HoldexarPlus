@@ -70,6 +70,14 @@ const bundles = {
   'bundles.store.bundleTag': 'Steam 捆绑包',
   'bundles.store.bundleMeta': '含 {n} 款 · ¥{price}',
   'bundles.store.bundleExpand': '点击展开包内游戏比价',
+  'bundles.store.packTag': '站点合辑',
+  'bundles.store.packMeta': '含 {n} 款（来自站点数据）',
+  'bundles.store.packExpand': '含 {n} 款 · 点击展开',
+  'bundles.store.packMemberUnlinked': '未关联',
+  'bundles.store.resetBtn': '重抓此包',
+  'bundles.store.resetConfirm': '删除该包的条目与档位数据并重新抓取？不影响其他包与游戏目录',
+  'bundles.store.resetConfirmBtn': '重抓',
+  'bundles.store.resetStarted': '已清空，正在后台重抓',
   'bundles.store.tier': '第 {i} 档',
   'bundles.store.tierEmpty': '该档暂无可展示的游戏',
   'bundles.store.tierBar': '价格档位',
@@ -95,6 +103,7 @@ const bundles = {
   'bundles.steam.appidFallback': 'AppID {id}',
   'bundles.steam.cnPrice': '国区',
   'bundles.steam.lowest': '最低',
+  'bundles.steam.diff': '差价 +{price}',
 
   /* 抽屉「补齐状态」栏（statusBar computed；completable/unknown 复用 mps.*） */
   'bundles.status.owned': '✅ 已拥有全部内容',

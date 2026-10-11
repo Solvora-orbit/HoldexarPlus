@@ -116,13 +116,14 @@ _WRITE_STARTED: set[str] = set()
 
 def reset_run_state() -> None:
     """每轮 crawl 开始前清空运行态（防上一轮残留串味）。"""
-    global NO_OPTIONS_COUNT, PARENT_FOLLOWED
+    global NO_OPTIONS_COUNT, PARENT_FOLLOWED, BUNDLES_DISCOVERED
     META.clear()
     PRESERVED.clear()
     FAILED_TASKS.clear()
     _WRITE_STARTED.clear()
     NO_OPTIONS_COUNT = 0
     PARENT_FOLLOWED = 0
+    BUNDLES_DISCOVERED = 0
 
 
 # ══════════════════════════════════════════════════════════════
@@ -170,7 +171,9 @@ def _release_in_future(release_date: str | None) -> bool:
 def _header_image(item: dict | None) -> str | None:
     assets = (item or {}).get("assets") or {}
     fmt = assets.get("asset_url_format") or ""
-    filename = assets.get("header") or ""
+    # 0.6.0：Sub（package）形态的资产**只有** package_header 键（实测 19080），
+    # 不兜这个键则整条 sub 轨永远无图——捆绑包联动入库的合辑全是这类形态
+    filename = assets.get("header") or assets.get("package_header") or ""
     if not fmt or not filename:
         return None
     return CDN_PREFIX + fmt.replace("${FILENAME}", filename)
@@ -867,7 +870,7 @@ async def _browse_price_task_inner(context) -> bool:
     返回 True = 任务已重推仍待重跑；False = 已终态
     （成功 / 穷尽 / 丢弃）。退避重推 / 断网守卫 / 欠账语义保持一致。
     """
-    global PARENT_FOLLOWED, NO_OPTIONS_COUNT
+    global PARENT_FOLLOWED, NO_OPTIONS_COUNT, BUNDLES_DISCOVERED
     task = context.task
     cc = task["region"]
     appids: list[int] = task["appids"]

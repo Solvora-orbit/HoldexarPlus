@@ -33,8 +33,8 @@ const src = useBundleSource(props.api, 'bundles.store')
 const {
   bundles, loading, running, ingestRunning, ingestPending,
   expanded, shown, hiddenCount,
-  open, detailLoading, detail, detailItems, detailPending, detailTiers,
-  refresh, ingestNow, openBundle, period, daysLeft, isLongRunning, urgencyClass,
+  open, detailLoading, detail, detailItems, detailPending, detailTiers, detailMemberItems,
+  resetting, refresh, ingestNow, openBundle, resetBundle, period, daysLeft, isLongRunning, urgencyClass,
 } = src
 
 // ─── 货币切换（站点原生多币种、零折算）───
@@ -217,6 +217,9 @@ const drawerPeriod = computed(() => (detail.value ? period(detail.value) : ''))
       :tiers="detailTiers"
       :items="detailItems"
       :pending="detailPending"
+      :member-items="detailMemberItems"
+      :resetting="resetting"
+      @reset="resetBundle"
     />
   </div>
 </template>
